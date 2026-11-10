@@ -11,7 +11,7 @@ import re
 import secrets
 from threading import Lock
 from time import monotonic
-from urllib.parse import parse_qs, quote, urlsplit
+from urllib.parse import parse_qs, quote, urlencode, urlsplit
 
 from . import round_web, task_pages, upgrade_pages, workbench, workbench_pages
 from .packages import ClientError, MAX_PACKAGE, strict_json
