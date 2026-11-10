@@ -1,0 +1,11 @@
+[Unit]
+Description=Taskpool local backup at 03:30 Hong Kong time
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 Asia/Hong_Kong
+Persistent=true
+AccuracySec=1min
+Unit=taskpool-local-backup.service
+
+[Install]
+WantedBy=timers.target

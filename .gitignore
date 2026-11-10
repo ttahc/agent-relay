@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+/.state/
+/dist/
+/.playwright-cli/
+/output/
+.env
+*.pem
+*.key
+*.credential

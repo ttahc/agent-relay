@@ -1,0 +1,5 @@
+.state
+dist
+.git
+**/__pycache__
+**/*.pyc

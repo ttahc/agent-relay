@@ -1,0 +1,2 @@
+# Keep exact bytes: build.py verifies vendor SHA256 and packages these files.
+* -text

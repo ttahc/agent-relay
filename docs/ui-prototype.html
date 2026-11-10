@@ -1,0 +1,1276 @@
+<title>任务池界面原型</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;600&display=swap">
+<style>
+/* Layout: slim left rail + work area; views for work, board, list, projects, feedback, windows, activity, accounts; task opens in a right-side panel (full screen on phones). */
+:root {
+  --bg: #f3f5f9; --surface: #ffffff; --sunken: #e9edf3; --line: #dbe1ea;
+  --fg: #1a2231; --muted: #5d6879; --accent: #2b59c3; --accent-soft: #e3eafa; --on-accent: #ffffff;
+  --s-draft: #7b8597; --s-open: #1f86c8; --s-doing: #b57a06; --s-review: #7456c4; --s-rework: #cc4f35; --s-done: #2b8a57; --s-cancel: #8a8f99;
+  --shadow: 0 1px 2px #1a22311a, 0 4px 14px #1a22310f;
+  --font-body: "Segoe UI", "PingFang SC", "Microsoft YaHei UI", "Noto Sans SC", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", Consolas, "SFMono-Regular", monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #12161e; --surface: #1a202b; --sunken: #232a37; --line: #2e3646;
+  --fg: #e4e9f2; --muted: #98a3b6; --accent: #7a9cf0; --accent-soft: #24304d; --on-accent: #0e1420;
+  --s-draft: #8d97a8; --s-open: #4fb0ea; --s-doing: #e0a93a; --s-review: #a68af0; --s-rework: #f07a60; --s-done: #4fc283; --s-cancel: #7d8494;
+  --shadow: 0 1px 2px #0006, 0 6px 18px #0005; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #12161e; --surface: #1a202b; --sunken: #232a37; --line: #2e3646;
+  --fg: #e4e9f2; --muted: #98a3b6; --accent: #7a9cf0; --accent-soft: #24304d; --on-accent: #0e1420;
+  --s-draft: #8d97a8; --s-open: #4fb0ea; --s-doing: #e0a93a; --s-review: #a68af0; --s-rework: #f07a60; --s-done: #4fc283; --s-cancel: #7d8494;
+  --shadow: 0 1px 2px #0006, 0 6px 18px #0005; color-scheme: dark }
+
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font-body); font-size: 14px; line-height: 1.5; }
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mono { font-family: var(--font-mono); font-size: 12px; letter-spacing: .01em; }
+h1, h2, h3, h4, p { margin: 0; }
+h1, h2, h3 { text-wrap: balance; }
+
+.app { display: grid; grid-template-columns: 196px 1fr; height: 100%; }
+.rail { background: var(--surface); border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 2px; padding: 14px 10px; padding-left: max(10px, env(safe-area-inset-left, 0px)); overflow-y: auto; }
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 700; padding: 4px 8px 14px; }
+.brand i { width: 22px; height: 22px; border-radius: 6px; background: var(--accent); display: grid; place-items: center; color: var(--on-accent); font-style: normal; font-size: 12px; }
+.rail button { display: flex; justify-content: space-between; align-items: center; border: 0; background: none; padding: 7px 10px; border-radius: 7px; text-align: left; color: var(--muted); }
+.rail button:hover { background: var(--sunken); color: var(--fg); }
+.rail button[aria-current="page"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.count { font-size: 12px; background: var(--s-rework); color: #fff; border-radius: 99px; padding: 0 7px; min-width: 20px; text-align: center; font-weight: 600; }
+.rail .sep { height: 1px; background: var(--line); margin: 10px 6px; flex: none; }
+.rail .who { margin-top: auto; display: grid; gap: 4px; padding: 8px; }
+.rail .who label { font-size: 12px; color: var(--muted); }
+.rail select { width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); }
+
+.main { display: flex; flex-direction: column; min-width: 0; height: 100%; }
+.top { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 12px 20px; padding-right: max(20px, env(safe-area-inset-right, 0px)); border-bottom: 1px solid var(--line); background: var(--surface); }
+.top h1 { font-size: 18px; margin-right: 6px; }
+.search { flex: 1 1 280px; min-width: 0; position: relative; }
+.search input { width: 100%; padding: 7px 10px 7px 30px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.search::before { content: "⌕"; position: absolute; left: 10px; top: 5px; color: var(--muted); font-size: 16px; }
+.top .spacer { flex: 1; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; flex-wrap: wrap; }
+.seg button { border: 0; background: var(--surface); padding: 6px 12px; color: var(--muted); }
+.seg button[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.btn { border: 1px solid var(--line); background: var(--surface); padding: 7px 12px; border-radius: 8px; display: inline-flex; gap: 6px; align-items: center; }
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); font-weight: 600; }
+.btn.danger { color: var(--s-rework); border-color: var(--s-rework); }
+.btn.sm { padding: 3px 9px; font-size: 12px; }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.link { border: 0; background: none; padding: 0; color: var(--accent); text-align: left; }
+.toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 10px 20px; font-size: 13px; color: var(--muted); }
+.toolbar select { padding: 4px 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); }
+.chip { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--line); background: var(--surface); border-radius: 99px; padding: 2px 10px; font-size: 12px; color: var(--muted); }
+button.chip[aria-pressed="true"], .chip.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.chip.strong { border-color: var(--s-review); color: var(--s-review); background: color-mix(in srgb, var(--s-review) 12%, transparent); }
+.chip .x { border: 0; background: none; padding: 0 0 0 2px; color: inherit; }
+.hint { margin-left: auto; font-size: 12px; }
+.hint code { font-family: var(--font-mono); background: var(--sunken); padding: 1px 5px; border-radius: 4px; }
+
+.view { flex: 1; overflow: auto; padding: 4px 20px 24px; padding-right: max(20px, env(safe-area-inset-right, 0px)); min-height: 0; }
+
+/* Board */
+.board { display: grid; grid-template-columns: repeat(6, minmax(220px, 1fr)); gap: 10px; min-width: 1360px; }
+.lane-title { grid-column: 1 / -1; font-weight: 600; font-size: 13px; padding: 10px 2px 2px; display: flex; gap: 8px; align-items: center; }
+.colhead { position: sticky; top: 0; z-index: 2; background: var(--bg); padding: 8px 4px 6px; display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; }
+.colhead .dot { width: 9px; height: 9px; border-radius: 50%; }
+.colhead .n { color: var(--muted); font-weight: 400; }
+.colhead .wip { margin-left: auto; font-size: 11px; color: var(--muted); font-weight: 400; }
+.colhead .wip.over { color: var(--s-rework); font-weight: 600; }
+.col { background: var(--sunken); border-radius: 10px; padding: 8px; display: flex; flex-direction: column; gap: 8px; min-height: 90px; transition: background .12s; }
+.col.drop-ok { background: var(--accent-soft); outline: 2px dashed var(--accent); }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; box-shadow: var(--shadow); cursor: pointer; display: grid; gap: 6px; text-align: left; width: 100%; }
+.card:hover { border-color: var(--accent); }
+.card[draggable="true"] { cursor: grab; }
+.card.dragging { opacity: .4; }
+.card .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.card .t { font-weight: 600; line-height: 1.35; }
+.card .id { color: var(--muted); }
+.flag { font-size: 11px; border-radius: 4px; padding: 0 6px; background: var(--sunken); color: var(--muted); }
+.flag.warn { background: color-mix(in srgb, var(--s-rework) 14%, transparent); color: var(--s-rework); }
+.tag { font-size: 11px; border-radius: 4px; padding: 0 6px; border: 1px solid var(--line); color: var(--muted); }
+.tag.v { border-color: var(--s-review); color: var(--s-review); }
+.av { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); }
+.av b { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; color: #fff; font-weight: 600; flex: none; }
+.av b.ai { border-radius: 5px; }
+.av.off { text-decoration: line-through; }
+.card .foot { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+
+/* Tables */
+.tablewrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+table { border-collapse: collapse; width: 100%; min-width: 760px; }
+th, td { padding: 9px 12px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+th { font-size: 12px; color: var(--muted); font-weight: 600; background: var(--sunken); }
+th[data-sort] { cursor: pointer; user-select: none; }
+tbody tr[data-open] { cursor: pointer; }
+tbody tr[data-open]:hover { background: var(--accent-soft); }
+td.title { white-space: normal; font-weight: 600; min-width: 220px; }
+td.wrap { white-space: normal; min-width: 160px; }
+td select, td input[type=text] { padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); }
+td input[type=text] { width: 100%; min-width: 180px; }
+.pill { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; }
+.pill::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+.off-row td { opacity: .55; }
+.st-on { color: var(--s-done); font-weight: 600; font-size: 12px; }
+.st-off { color: var(--s-rework); font-weight: 600; font-size: 12px; }
+.ops { display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* My work */
+.mine { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.mine section { display: grid; gap: 8px; }
+.mine h2 { font-size: 14px; display: flex; gap: 8px; align-items: baseline; padding: 6px 2px; }
+.mine h2 small { color: var(--muted); font-weight: 400; font-size: 12px; }
+.mine .why { font-size: 12px; color: var(--accent); }
+.mine .why.no { color: var(--muted); }
+.empty { color: var(--muted); font-size: 13px; padding: 14px; border: 1px dashed var(--line); border-radius: 8px; }
+
+/* Generic page blocks */
+.page { display: grid; gap: 16px; max-width: 1080px; }
+.phead { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.phead h2 { font-size: 20px; }
+.phead .seg, .phead .right { margin-left: auto; }
+.box { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 12px; min-width: 0; }
+.box h3 { font-size: 14px; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.ovgrid { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.form { display: grid; gap: 14px; }
+.f { display: grid; gap: 5px; min-width: 0; }
+.f > span { font-size: 13px; font-weight: 600; }
+.f > span em { color: var(--s-rework); font-style: normal; }
+.form input[type=text], .form input[type=password], .form input[type=number], .form textarea, .form select { width: 100%; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.form textarea { min-height: 64px; resize: vertical; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.chips input { width: 150px; padding: 3px 9px; border-radius: 99px; border: 1px solid var(--line); background: var(--bg); }
+.check { display: flex; gap: 8px; align-items: center; font-size: 13px; }
+.radios { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; }
+.radios label { display: flex; gap: 5px; align-items: center; }
+.addrow { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.addrow select, .addrow input { padding: 6px 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); min-width: 0; }
+.small { font-size: 12px; color: var(--muted); }
+
+/* Projects */
+.projgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+.proj { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 16px; display: grid; gap: 10px; text-align: left; }
+button.proj:hover { border-color: var(--accent); }
+.proj h2 { font-size: 16px; }
+.stack { display: flex; height: 8px; border-radius: 99px; overflow: hidden; background: var(--sunken); }
+.stack span { display: block; height: 100%; }
+.legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+.legend span { display: inline-flex; gap: 5px; align-items: center; }
+.legend i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.avs { display: flex; gap: 3px; flex-wrap: wrap; }
+.recent { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; font-size: 13px; }
+.recent li { display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; }
+.recent .when { color: var(--muted); font-size: 12px; margin-left: auto; }
+
+/* Windows */
+.wins { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 12px; }
+.win { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; display: grid; gap: 10px; align-content: start; }
+.win .head { display: flex; justify-content: space-between; align-items: center; }
+.online { font-size: 12px; color: var(--s-done); }
+.online.off { color: var(--muted); }
+.win h4 { font-size: 13px; margin-bottom: 4px; }
+.win ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+.report { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: 13px; padding: 8px 10px; border-radius: 8px; background: var(--sunken); }
+.caps li { display: grid; grid-template-columns: auto auto 1fr auto; gap: 8px; align-items: center; font-size: 13px; }
+.badge { font-size: 11px; border-radius: 4px; padding: 0 6px; font-weight: 600; white-space: nowrap; }
+.badge.ok { color: var(--s-done); background: color-mix(in srgb, var(--s-done) 14%, transparent); }
+.badge.dec { color: var(--muted); background: var(--sunken); }
+.badge.warn { color: var(--s-rework); background: color-mix(in srgb, var(--s-rework) 14%, transparent); }
+.badge.mid { color: var(--s-doing); background: color-mix(in srgb, var(--s-doing) 14%, transparent); }
+.badge.info { color: var(--s-open); background: color-mix(in srgb, var(--s-open) 14%, transparent); }
+.caps .basis { font-size: 12px; color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+.capadd { display: grid; grid-template-columns: auto 1fr auto; gap: 6px; }
+.capadd select, .capadd input { padding: 5px 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg); min-width: 0; }
+
+/* Accounts */
+.secret { display: grid; gap: 8px; border: 1px solid var(--s-doing); background: color-mix(in srgb, var(--s-doing) 10%, var(--surface)); border-radius: 10px; padding: 14px; }
+.codebox { font-family: var(--font-mono); font-size: 12px; background: var(--sunken); border-radius: 8px; padding: 10px 12px; white-space: pre-wrap; overflow-wrap: anywhere; user-select: all; }
+.matrix td:not(:first-child), .matrix th:not(:first-child) { text-align: center; }
+.matrix .y { color: var(--s-done); font-weight: 700; }
+.matrix .n { color: var(--muted); }
+
+/* Panel */
+.scrim { position: fixed; inset: 0; background: #0b101a55; z-index: 20; }
+.panel { position: fixed; top: 0; right: 0; bottom: 0; width: min(780px, 100%); background: var(--surface); z-index: 21; box-shadow: -8px 0 30px #0003; display: grid; grid-template-rows: auto 1fr; padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); padding-right: env(safe-area-inset-right, 0px); }
+.panel header { display: flex; gap: 10px; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.panel header .x { margin-left: auto; border: 0; background: none; font-size: 20px; color: var(--muted); }
+.pbody { overflow: auto; display: grid; grid-template-columns: minmax(0, 1fr) 236px; align-items: start; }
+.pmain { padding: 18px; display: grid; gap: 18px; min-width: 0; }
+.pmain h2 { font-size: 20px; line-height: 1.35; }
+.pmain h3 { font-size: 13px; color: var(--muted); font-weight: 600; margin-bottom: 6px; }
+.pmain .brief { white-space: pre-wrap; }
+.crit { margin: 0; padding: 0; list-style: none; display: grid; gap: 4px; }
+.crit li { display: flex; gap: 8px; align-items: flex-start; }
+.crit li::before { content: "□"; color: var(--muted); }
+.crit li.ok::before { content: "✓"; color: var(--s-done); font-weight: 700; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; padding: 12px; border-radius: 10px; background: var(--sunken); }
+.actions .note { font-size: 13px; color: var(--muted); flex-basis: 100%; }
+.actform { display: grid; gap: 8px; flex-basis: 100%; }
+.actform textarea, .actform input[type=text], .actform select { width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.actform textarea { min-height: 64px; resize: vertical; }
+.actform label { display: flex; gap: 6px; align-items: center; font-size: 13px; }
+.manage { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; font-size: 12px; color: var(--muted); }
+.callout { border-left: 3px solid var(--s-doing); background: color-mix(in srgb, var(--s-doing) 9%, transparent); padding: 10px 12px; border-radius: 0 8px 8px 0; font-size: 13px; display: grid; gap: 4px; }
+.files { display: grid; gap: 6px; }
+.file { display: flex; gap: 8px; align-items: center; font-size: 13px; flex-wrap: wrap; }
+.rev { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; display: grid; gap: 4px; }
+.rev.cur { border-color: var(--accent); }
+.rels { display: grid; gap: 4px; font-size: 13px; }
+.timeline { margin: 0; padding: 0; list-style: none; display: grid; gap: 10px; border-left: 2px solid var(--line); padding-left: 14px; }
+.timeline li { position: relative; font-size: 13px; }
+.timeline li::before { content: ""; position: absolute; left: -20px; top: 6px; width: 10px; height: 10px; border-radius: 50%; background: var(--surface); border: 2px solid var(--accent); }
+.timeline .when { color: var(--muted); font-size: 12px; }
+.comment { display: flex; gap: 8px; }
+.comment input { flex: 1; min-width: 0; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+details.tech { font-size: 12px; color: var(--muted); }
+details.tech summary { cursor: pointer; }
+details.tech dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 12px; margin: 8px 0 0; }
+details.tech dd { margin: 0; overflow-wrap: anywhere; }
+.side { border-left: 1px solid var(--line); padding: 18px 16px; display: grid; gap: 14px; background: var(--bg); align-self: stretch; align-content: start; }
+.field { display: grid; gap: 3px; }
+.field > span { font-size: 12px; color: var(--muted); }
+.field .tags { display: flex; gap: 4px; flex-wrap: wrap; }
+
+/* Popover + modal */
+.pop { position: fixed; z-index: 31; top: calc(58px + env(safe-area-inset-top, 0px)); right: max(16px, env(safe-area-inset-right, 0px)); width: min(380px, calc(100% - 32px)); max-height: 70%; overflow: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 16px 40px #0004; padding: 12px; display: grid; gap: 6px; }
+.pop .item { border: 0; background: none; text-align: left; padding: 8px; border-radius: 8px; display: grid; gap: 2px; font-size: 13px; }
+.pop .item:hover { background: var(--sunken); }
+.pop .item.unread { background: var(--accent-soft); }
+.modal { position: fixed; z-index: 31; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(620px, calc(100% - 32px)); max-height: calc(100% - 40px); overflow: auto; background: var(--surface); border-radius: 12px; box-shadow: 0 20px 60px #0005; padding: 20px; display: grid; gap: 14px; }
+.modal h2 { font-size: 18px; }
+.modal details { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+.modal details summary { cursor: pointer; font-weight: 600; font-size: 13px; }
+.modal details[open] { display: grid; gap: 12px; }
+.modal footer { display: flex; gap: 8px; justify-content: flex-end; align-items: center; flex-wrap: wrap; }
+.modal footer label { margin-right: auto; font-size: 13px; display: flex; gap: 6px; align-items: center; }
+
+/* Notes */
+.notes { display: grid; gap: 14px; max-width: 1040px; }
+.notes .tablewrap table { min-width: 720px; }
+.notes td { white-space: normal; vertical-align: top; }
+.notes p { max-width: 72ch; color: var(--muted); }
+.notes h2 { font-size: 16px; }
+
+.toast { position: fixed; z-index: 40; left: 50%; bottom: calc(24px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--fg); color: var(--bg); padding: 9px 16px; border-radius: 8px; font-size: 13px; max-width: calc(100% - 32px); box-shadow: var(--shadow); }
+
+@media (max-width: 760px) {
+  .app { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+  .rail { flex-direction: row; overflow-x: auto; overflow-y: hidden; border-right: 0; border-bottom: 1px solid var(--line); padding: 8px max(12px, env(safe-area-inset-right, 0px)) 8px max(12px, env(safe-area-inset-left, 0px)); align-items: center; }
+  .rail .brand, .rail .sep { display: none; }
+  .rail button { white-space: nowrap; flex: none; }
+  .rail .who { margin: 0; padding: 0 0 0 6px; flex: none; }
+  .rail .who label { display: none; }
+  .top, .toolbar, .view { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  .hint { display: none; }
+  .mine, .ovgrid, .two { grid-template-columns: 1fr; }
+  .pbody { grid-template-columns: 1fr; }
+  .side { border-left: 0; border-top: 1px solid var(--line); order: -1; grid-template-columns: 1fr 1fr; }
+  .phead .seg, .phead .right { margin-left: 0; }
+  .wins { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="app">
+  <nav class="rail" aria-label="主导航">
+    <div class="brand"><i>任</i>任务池</div>
+    <button data-nav="mine">我的工作 <span class="count" id="mineCount"></span></button>
+    <button data-nav="board">看板</button>
+    <button data-nav="list">列表</button>
+    <button data-nav="projects">项目</button>
+    <button data-nav="feedback">反馈与改进 <span class="count" id="fbCount"></span></button>
+    <button data-nav="windows">AI 窗口</button>
+    <button data-nav="activity">动态</button>
+    <button data-nav="accounts">账号与权限</button>
+    <div class="sep"></div>
+    <button data-nav="notes">设计说明</button>
+    <div class="who">
+      <label for="who">以此身份查看（原型）</label>
+      <select id="who"></select>
+    </div>
+  </nav>
+
+  <div class="main">
+    <div class="top">
+      <h1 id="viewTitle">我的工作</h1>
+      <div class="search" id="searchWrap"><input id="q" type="search" placeholder="搜索标题或编号，也可以写 状态:待验收 执行:CDX-0002" aria-label="搜索任务"></div>
+      <div class="spacer" id="spacer"></div>
+      <div class="seg" id="projSeg" role="group" aria-label="项目"></div>
+      <button class="btn" id="bell" aria-label="通知">通知 <span class="count" id="bellCount"></span></button>
+      <button class="btn primary" id="newBtn">新建任务</button>
+    </div>
+    <div class="toolbar" id="toolbar"></div>
+    <div class="view" id="view"></div>
+  </div>
+</div>
+<div id="layer"></div>
+<div class="toast" id="toast" role="status" hidden></div>
+
+<script>
+/* ================= data ================= */
+const STATES = [
+  { k: "draft", n: "草稿", c: "--s-draft" },
+  { k: "open", n: "可领取", c: "--s-open" },
+  { k: "doing", n: "进行中", c: "--s-doing" },
+  { k: "review", n: "待验收", c: "--s-review" },
+  { k: "rework", n: "返修中", c: "--s-rework" },
+  { k: "done", n: "已完成", c: "--s-done" }
+];
+const S = Object.fromEntries([...STATES, { k: "cancelled", n: "已取消", c: "--s-cancel" }].map(s => [s.k, s]));
+/* project roles are permission tiers only; who executes or reviews is a field on each task */
+const ROLES = ["项目管理员", "贡献者", "报告者", "观察者"];
+const DOERS = ["项目管理员", "贡献者"];
+
+const PEOPLE = {
+  "admin":    { kind: "人员", color: "#4a5a78", sys: true },
+  "worker-a": { kind: "人员", color: "#1f86c8" },
+  "worker-b": { kind: "人员", color: "#b57a06" },
+  "reviewer": { kind: "人员", color: "#7456c4" },
+  "requester": { kind: "人员", color: "#a0527a" },
+  "observer": { kind: "人员", color: "#6f7c8f" },
+  "CDX-0002": { kind: "AI", color: "#2b8a57", platform: "Codex", owner: "admin", online: true, where: "Windows · task-pool 目录", auto: "仅通知", report: { s: "工作中", note: "正在整理 T09 对照表", at: "11-07 11:02" } },
+  "CLD-0001": { kind: "AI", color: "#cc4f35", platform: "Claude", owner: "worker-a", online: false, where: "桌面应用 · 资料整理", auto: "仅通知", report: { s: "等待输入", note: "T11 被退回后未再联系", at: "11-06 18:31" } }
+};
+for (const k in PEOPLE) PEOPLE[k].active = true;
+const SEEN = { "admin": "11-07 11:20", "worker-a": "11-07 10:15", "worker-b": "11-05 18:02", "reviewer": "11-07 09:58", "requester": "11-07 10:40", "observer": "11-06 17:00", "CDX-0002": "11-07 11:02", "CLD-0001": "11-06 18:31" };
+const PREFIX = { Codex: "CDX", Claude: "CLD", Gemini: "GEM", 其他: "EXT" };
+
+/* N01: capabilities are declared by each member; verification is a separate fact with its basis */
+const CAPS = {
+  "CDX-0002": [
+    { tag: "Markdown 写作", status: "已核实", basis: "T08 交付经 reviewer 核验" },
+    { tag: "联网检索", status: "已核实", basis: "T08 引用来源经 reviewer 核验" },
+    { tag: "读取内网", status: "已核实", basis: "T08 经 HTTPS 入口领取并交付" },
+    { tag: "上传交付", status: "已核实", basis: "T08 交付封存" },
+    { tag: "浏览器操作", status: "已申报", basis: "自报：可驱动本机浏览器" }
+  ],
+  "CLD-0001": [
+    { tag: "Markdown 写作", status: "已申报", basis: "自报" },
+    { tag: "联网检索", status: "已申报", basis: "自报：有网页搜索工具" },
+    { tag: "表格处理", status: "已申报", basis: "自报" }
+  ],
+  "worker-a": [
+    { tag: "浏览器操作", status: "已核实", basis: "T05 手机端实测" },
+    { tag: "上传交付", status: "已核实", basis: "T05 交付封存" },
+    { tag: "Markdown 写作", status: "已申报", basis: "自报" }
+  ],
+  "worker-b": [{ tag: "浏览器操作", status: "已申报", basis: "自报" }],
+  "reviewer": [], "admin": [], "requester": [], "observer": []
+};
+for (const k in CAPS) CAPS[k].forEach(c => c.expires = "2027-11-07");
+const PROJ = [
+  { id: "P1", name: "任务协作平台", desc: "任务服务本身的建设、部署与验收。", owner: "admin", receiver: "reviewer", autoOpen: false, wip: 3,
+    tags: ["Markdown 写作", "联网检索", "读取内网", "上传交付", "浏览器操作"], labels: ["测试", "文档", "运维", "调研"],
+    members: { "admin": { role: "项目管理员", duty: "账号准入、项目授权、开放任务", labels: [] }, "reviewer": { role: "贡献者", duty: "主要负责验收", labels: ["测试"] },
+      "worker-a": { role: "贡献者", duty: "手机端与浏览器实测", labels: ["测试"] }, "worker-b": { role: "贡献者", duty: "有线设备复验", labels: ["测试", "运维"] },
+      "CDX-0002": { role: "贡献者", duty: "方案起草、资料检索", labels: ["调研", "文档"] }, "CLD-0001": { role: "贡献者", duty: "文案改写", labels: ["文档"] },
+      "requester": { role: "报告者", duty: "提出部署与使用需求", labels: [] } } },
+  { id: "P2", name: "资料整理", desc: "调研汇总和对外说明材料。", owner: "admin", receiver: "reviewer", autoOpen: true, wip: 4,
+    tags: ["Markdown 写作", "联网检索", "读取内网", "表格处理"], labels: ["调研", "文档", "整理"],
+    members: { "admin": { role: "项目管理员", duty: "", labels: [] }, "reviewer": { role: "贡献者", duty: "核验交付", labels: [] },
+      "worker-a": { role: "贡献者", duty: "截图与说明整理", labels: ["整理"] }, "CDX-0002": { role: "贡献者", duty: "调研汇总", labels: ["调研"] },
+      "observer": { role: "观察者", duty: "了解进度", labels: [] } } }
+];
+
+let seq = 12;
+const T = [
+  { id: "T02", title: "任务体系建设方案与试点验收清单", project: "P1", status: "open", assignee: null, receiver: "reviewer", req: [{ tag: "Markdown 写作" }, { tag: "联网检索", verify: true }], mode: "公开", target: [], brief: "整理本机试点的任务体系方案，形成方案文档与验收清单。", criteria: ["方案覆盖账号、任务、窗口三类对象", "验收清单逐项可核对"], deps: [], rel: [], inputs: ["brief.md", "前轮验收记录.md"], revs: [], log: [["admin", "创建任务", "11-05 10:12"], ["admin", "开放领取", "11-06 09:30"]] },
+  { id: "T07", title: "另一台有线设备复验登录与领取", project: "P1", status: "open", assignee: null, receiver: "reviewer", req: [{ tag: "浏览器操作" }], mode: "限定", target: ["worker-b"], brief: "用另一台有线设备访问 HTTPS 入口，完成登录、领取和上传。", criteria: ["证书校验通过", "完成一次领取并上传"], deps: [], rel: [], inputs: ["taskpool-lan-cert.pem"], revs: [], paused: true, log: [["admin", "创建任务，限定 worker-b 领取", "11-06 14:02"], ["admin", "暂停：暂缺另一台有线设备", "11-06 14:05"]] },
+  { id: "T09", title: "汇总三家看板产品的状态设计", project: "P2", status: "doing", assignee: "CDX-0002", receiver: "reviewer", req: [{ tag: "联网检索" }, { tag: "Markdown 写作" }], mode: "优先", target: ["CDX-0002"], brief: "比较 YouTrack、Linear、Kanboard 的状态与列设计，输出对照表。", criteria: ["每家附官方文档链接", "给出对本项目的建议"], deps: [], rel: [{ type: "来自反馈", id: "F01" }], inputs: [], revs: [], log: [["admin", "由反馈 F01 转为任务，优先通知 CDX-0002", "11-07 09:01"], ["CDX-0002", "领取任务", "11-07 09:02"]] },
+  { id: "T10", title: "整理手机端验收截图说明", project: "P2", status: "review", assignee: "worker-a", receiver: "reviewer", req: [{ tag: "Markdown 写作" }], mode: "公开", target: [], brief: "把 T05、T06 的手机验收截图整理成一页说明。", criteria: ["截图按流程顺序排列", "每张图有一句说明"], deps: [], rel: [{ type: "相关", id: "T05" }], inputs: ["v3-task-mobile.png"], revs: [{ n: 1, files: ["手机验收说明.md", "截图.zip"], at: "11-07 10:15", by: "worker-a" }], log: [["worker-a", "领取任务", "11-07 08:40"], ["worker-a", "上传交付（修订 1，2 个文件）", "11-07 10:15"]] },
+  { id: "T11", title: "登录页错误提示文案改写", project: "P1", status: "rework", assignee: "CLD-0001", receiver: "reviewer", req: [{ tag: "Markdown 写作" }], mode: "公开", target: [], brief: "改写登录、注册、重置密码页面的错误提示。", criteria: ["每条提示说明原因和下一步", "不出现内部字段名"], deps: [], rel: [], inputs: ["当前错误提示.txt"], revs: [{ n: 1, files: ["提示文案.md"], at: "11-06 17:05", by: "CLD-0001" }], log: [["CLD-0001", "领取任务", "11-06 16:20"], ["CLD-0001", "上传交付（修订 1，1 个文件）", "11-06 17:05"], ["reviewer", "退回修订 1：未通过「不出现内部字段名」，仍出现 scope_version", "11-06 18:30"]], flag: "窗口离线" },
+  { id: "T12", title: "服务器部署前的检查清单", project: "P1", status: "draft", assignee: null, receiver: "reviewer", req: [], mode: "公开", target: [], brief: "列出从 WSL 迁到服务器前要确认的端口、证书和备份事项。", criteria: ["覆盖端口、证书、备份、账号四类"], deps: ["T02"], rel: [], inputs: [], revs: [], log: [["admin", "由 requester 的反馈转为任务", "11-07 11:00"]] },
+  { id: "T05", title: "手机端领取与上传验收", project: "P1", status: "done", assignee: "worker-a", receiver: "reviewer", req: [{ tag: "浏览器操作", verify: true }], mode: "公开", target: [], brief: "真实手机经 EasyTier 登录、领取、上传。", criteria: ["领取成功", "上传后显示待验收"], deps: [], rel: [], inputs: [], revs: [{ n: 1, files: ["交付.zip"], at: "11-06 20:31", by: "worker-a" }], log: [["worker-a", "领取任务", "11-06 20:10"], ["worker-a", "上传交付（修订 1）", "11-06 20:31"], ["reviewer", "逐项核对 2 条判据，验收通过", "11-06 20:40"]] },
+  { id: "T08", title: "AI 邀请接入实测记录", project: "P2", status: "done", assignee: "CDX-0002", receiver: "reviewer", req: [{ tag: "读取内网" }], mode: "公开", target: [], brief: "记录 Codex 窗口从邀请到交付的完整过程。", criteria: ["记录每一步的结果"], deps: [], rel: [], inputs: [], revs: [{ n: 1, files: ["接入记录.md"], at: "11-06 21:20", by: "CDX-0002" }], log: [["CDX-0002", "领取任务", "11-06 21:00"], ["CDX-0002", "上传交付（修订 1）", "11-06 21:20"], ["reviewer", "逐项核对 1 条判据，验收通过", "11-06 21:35"]] },
+  { id: "T04", title: "旧版令牌登录说明", project: "P1", status: "cancelled", assignee: null, receiver: "reviewer", req: [], mode: "公开", target: [], brief: "为旧版令牌登录写操作说明。", criteria: ["覆盖登录与退出"], deps: [], rel: [], inputs: [], revs: [], log: [["admin", "创建任务", "11-05 09:00"], ["admin", "取消：已改为账号密码登录，不再需要", "11-06 10:00"]] }
+];
+const OWN = { T02: "admin", T07: "worker-b", T09: "worker-a", T10: "reviewer", T11: "admin", T12: "requester", T05: "worker-a", T08: "admin", T04: "admin" };
+T.forEach(t => { t.owner = OWN[t.id] || "admin"; t.watchers = []; });
+T.find(t => t.id === "T02").watchers = ["observer", "requester"];
+let fseq = 4;
+const FB = [
+  { id: "F01", kind: "建议", title: "界面希望接近 YouTrack 的看板", detail: "现在的看板是按钮平铺，找任务要翻很久。", by: "admin", at: "11-07 08:50", project: "P2", task: null, status: "已纳入", toTask: "T09", dup: null, result: "" },
+  { id: "F02", kind: "问题", title: "登记任务要手写 JSON", detail: "能力、资源要写 [] 和英文枚举，填错就报错。", by: "reviewer", at: "11-07 09:10", project: "P1", task: null, status: "待评估", toTask: null, dup: null, result: "" },
+  { id: "F03", kind: "使用反馈", title: "手机上登录按钮偏小", detail: "单手操作容易点到注册链接。", by: "worker-a", at: "11-06 20:45", project: "P1", task: "T05", status: "已完成", toTask: null, dup: null, result: "已在 v3 调整为 44 像素高，T06 复验时未再误触。" },
+  { id: "F04", kind: "问题", title: "看板上找不到自己的任务", detail: "希望有「我的」筛选。", by: "worker-b", at: "11-07 09:30", project: "P1", task: null, status: "重复", toTask: null, dup: "F01", result: "" }
+];
+const NOTIFS = [
+  { to: "reviewer", text: "T10 已交付修订 1，等你验收", task: "T10", at: "11-07 10:15", read: false },
+  { to: "CLD-0001", text: "T11 被退回：未通过「不出现内部字段名」", task: "T11", at: "11-06 18:30", read: false },
+  { to: "CDX-0002", text: "T09 优先通知你领取", task: "T09", at: "11-07 09:01", read: true },
+  { to: "admin", text: "新反馈 F02：登记任务要手写 JSON", task: null, at: "11-07 09:10", read: false },
+  { to: "worker-b", text: "T07 限定你领取，目前已暂停", task: "T07", at: "11-06 14:05", read: false }
+];
+const INVITES = [
+  { code: "INV-7K2M-Q9TD", kind: "AI", platform: "Claude", owner: "worker-a", project: "P2", role: "贡献者", by: "admin", at: "11-07 10:20", expires: "11-08 10:20", used: null, revoked: false },
+  { code: "INV-3HXP-L6WA", kind: "人员", project: "P1", role: "贡献者", by: "admin", at: "11-05 09:00", expires: "11-06 09:00", used: "worker-b", revoked: false }
+];
+
+/* ================= helpers ================= */
+const st = { who: "reviewer", view: "mine", q: "", proj: "全部", lane: "无", sort: "id", open: null, form: null, chip: "全部", pv: null, ptab: "概览", atab: "", ikind: "AI", secret: null, lastInvite: null, actWho: "全部" };
+try { const saved = JSON.parse(localStorage.getItem("tp-proto") || "{}"); Object.assign(st, { who: saved.who || st.who, view: saved.view || st.view, lane: saved.lane || st.lane }); } catch (e) {}
+if (!PEOPLE[st.who]) st.who = "reviewer";
+const save = () => { try { localStorage.setItem("tp-proto", JSON.stringify({ who: st.who, view: st.view, lane: st.lane })); } catch (e) {} };
+
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const now = () => { const d = new Date(); return `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`; };
+const hex = id => { let h = 0; for (const c of id) h = (h * 31 + c.charCodeAt(0)) >>> 0; return (h.toString(16) + "a3f9c2e17b4d0865").slice(0, 16); };
+const rand = n => Array.from({ length: n }, () => "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[Math.floor(Math.random() * 32)]).join("");
+const me = () => st.who;
+const pj = id => PROJ.find(p => p.id === id);
+const pname = id => (pj(id) || {}).name || id;
+const task = id => T.find(x => x.id === id);
+const roleIn = (w, pid) => ((pj(pid) || { members: {} }).members[w] || {}).role;
+const isPAdmin = (w, pid) => PEOPLE[w].sys || roleIn(w, pid) === "项目管理员";
+const canDo = (w, pid) => DOERS.includes(roleIn(w, pid));
+const canWrite = (w, pid) => PEOPLE[w].active && (PEOPLE[w].sys || (!!roleIn(w, pid) && roleIn(w, pid) !== "观察者"));
+const isVerifier = w => PEOPLE[w].kind === "人员" && PEOPLE[w].active && (PEOPLE[w].sys || PROJ.some(p => (p.members[w] || {}).role === "项目管理员") || T.some(t => t.receiver === w));
+const execAnywhere = w => PROJ.some(p => DOERS.includes((p.members[w] || {}).role));
+const capOf = (w, tag) => (CAPS[w] || []).find(c => c.tag === tag);
+const admins = pid => Object.keys(pj(pid).members).filter(n => pj(pid).members[n].role === "项目管理员");
+const doers = pid => Object.keys(pj(pid).members).filter(n => DOERS.includes(pj(pid).members[n].role) && PEOPLE[n].active);
+const targetHit = (t, w) => t.target.some(x => x === w || (x.startsWith("#") && ((pj(t.project).members[w] || {}).labels || []).includes(x.slice(1))));
+const targetText = t => t.target.map(x => x.startsWith("#") ? "分工「" + x.slice(1) + "」" : x).join("、");
+const followers = t => [...new Set([t.owner, ...t.watchers])];
+const notify = (to, text, tk) => { if (to && PEOPLE[to]) NOTIFS.unshift({ to, text, task: tk || null, at: now(), read: false }); };
+const live = t => t.status !== "cancelled";
+
+function avatar(name, withName = true) {
+  if (!name) return `<span class="av">未领取</span>`;
+  const p = PEOPLE[name];
+  return `<span class="av ${p.active ? "" : "off"}" title="${esc(name)}${p.active ? "" : "（已停用）"}"><b class="${p.kind === "AI" ? "ai" : ""}" style="background:${p.color}">${esc(name.replace(/^(worker|member)-/, "").slice(0, 2).toUpperCase())}</b>${withName ? esc(name) : ""}</span>`;
+}
+const pill = k => `<span class="pill" style="color:var(${S[k].c})">${S[k].n}</span>`;
+const reqTag = r => `<span class="tag ${r.verify ? "v" : ""}">${esc(r.tag)}${r.verify ? " · 需核实" : ""}</span>`;
+const stack = list => `<div class="stack">${STATES.map(s => { const n = list.filter(t => t.status === s.k).length; return n ? `<span style="width:${n / list.length * 100}%;background:var(${s.c})" title="${s.n} ${n}"></span>` : ""; }).join("")}</div>`;
+function toast(msg) { const t = $("#toast"); t.textContent = msg; t.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => t.hidden = true, 2800); }
+function copy(text) { navigator.clipboard?.writeText(text).then(() => toast("已复制"), () => toast("复制失败，请手动选中文字复制")) ?? toast("请手动选中文字复制"); }
+
+/* ================= rules ================= */
+function canClaim(t, w) {
+  if (t.status !== "open") return [false, ""];
+  if (!PEOPLE[w].active) return [false, "你的账号已停用"];
+  if (t.paused) return [false, "任务已暂停"];
+  const role = roleIn(w, t.project);
+  if (!role) return [false, `你不是「${pname(t.project)}」的成员`];
+  if (!DOERS.includes(role)) return [false, `你在该项目是${role}，不能领取任务`];
+  if (t.receiver === w) return [false, "你是本任务的验收人，不能同时执行"];
+  if (t.mode === "限定" && !targetHit(t, w)) return [false, `仅限 ${targetText(t)} 领取`];
+  const blocked = t.deps.find(d => (task(d) || {}).status !== "done");
+  if (blocked) return [false, `需等 ${blocked} 完成`];
+  for (const r of t.req) {
+    const c = capOf(w, r.tag);
+    if (!c) return [false, `缺少能力「${r.tag}」，可在「我的账号」或 AI 窗口页申报`];
+    if (r.verify && c.status !== "已核实") return [false, `「${r.tag}」要求已核实，你目前是已申报`];
+  }
+  return [true, t.mode === "优先" && !targetHit(t, w) ? `优先通知了 ${targetText(t)}，你也可以领` : ""];
+}
+function notifyClaimable(t, why) {
+  const p = pj(t.project);
+  const list = Object.keys(p.members).filter(n => canClaim(t, n)[0] && (t.mode === "公开" || targetHit(t, n)));
+  list.forEach(n => notify(n, `${t.id} ${why}`, t.id));
+}
+function move(t, to, w, extra = {}) {
+  const from = t.status;
+  if (t.cancelWait) { toast("任务取消中，等执行人确认停止"); return false; }
+  if (t.resumeNeeded && to !== "open") { toast("先点「继续执行」"); return false; }
+  if (t.paused && !["open", "draft"].includes(from) && to !== "open") { toast("任务已暂停，先由项目管理员恢复"); return false; }
+  const reclaim = () => isPAdmin(w, t.project) && t.assignee && !PEOPLE[t.assignee].active;
+  const rule = {
+    "draft>open": () => isPAdmin(w, t.project) || "只有项目管理员可以开放任务",
+    "open>doing": () => { const [ok, why] = canClaim(t, w); return ok || why; },
+    "doing>open": () => t.assignee === w || reclaim() || "只有当前执行人可以放回",
+    "rework>open": () => reclaim() || "只有项目管理员可以收回停用账号的任务",
+    "doing>review": () => t.assignee === w || "只有当前执行人可以交付",
+    "rework>review": () => t.assignee === w || "只有当前执行人可以重新交付",
+    "review>done": () => t.receiver !== w ? "只有本任务的验收人可以验收" : t.assignee === w ? "执行人不能验收自己的交付" : true,
+    "review>rework": () => t.receiver === w || "只有本任务的验收人可以退回",
+    "rework>doing": () => t.assignee === w || "只有当前执行人可以继续"
+  }[from + ">" + to];
+  const ok = rule ? rule() : `不能从「${S[from].n}」直接到「${S[to].n}」`;
+  if (ok !== true) { toast(ok); return false; }
+  const rev = t.revs.length + 1;
+  const verb = { "draft>open": "开放领取", "open>doing": "领取任务", "doing>open": "放回任务池", "rework>open": "收回到任务池", "doing>review": `上传交付（修订 ${rev}）`, "rework>review": `重新交付（修订 ${rev}）`, "review>done": "验收通过并归档", "review>rework": `退回修订 ${t.revs.length}`, "rework>doing": "开始返修" }[from + ">" + to];
+  t.log.push([w, verb + (extra.note ? "：" + extra.note : ""), now()]);
+  if (to === "review") t.revs.push({ n: rev, files: extra.files, at: now(), by: w });
+  if (to === "doing" && from === "open") { t.assignee = w; notify(t.receiver, `${w} 领取了 ${t.id}`, t.id); }
+  if (to === "review") notify(t.receiver, `${t.id} 已交付修订 ${rev}，等你验收`, t.id);
+  if (to === "rework") notify(t.assignee, `${t.id} 被退回${extra.note ? "：" + extra.note : ""}`, t.id);
+  if (to === "done") {
+    notify(t.assignee, `${t.id} 验收通过`, t.id);
+    T.filter(x => x.deps.includes(t.id) && live(x)).forEach(x => admins(x.project).forEach(a => notify(a, `${t.id} 已完成，${x.id} 的前置条件已满足`, x.id)));
+    FB.filter(f => f.toTask === t.id).forEach(f => admins(f.project).forEach(a => notify(a, `反馈 ${f.id} 对应的 ${t.id} 已完成，请复核效果`, null)));
+  }
+  if (to === "open") { if (from !== "draft") t.handoff = { by: t.assignee, note: extra.note || "", at: now() }; t.assignee = null; }
+  t.status = to; if (to !== "rework") delete t.flag;
+  if (to === "open") notifyClaimable(t, from === "draft" ? "已开放，可以领取" : "已放回任务池，附交接说明");
+  followers(t).filter(x => x !== w).forEach(x => notify(x, `${t.id} ${verb.split("，")[0]}（${w}）`, t.id));
+  toast(`${t.id} ${verb.split("，")[0]}`);
+  render(); return true;
+}
+
+/* ================= search ================= */
+function matches(t) {
+  if (st.proj !== "全部" && t.project !== st.proj) return false;
+  if (st.chip === "我的" && ![t.assignee, t.receiver, t.owner, ...t.watchers].includes(me())) return false;
+  for (const tok of st.q.trim().split(/\s+/).filter(Boolean)) {
+    const m = tok.match(/^(状态|执行|接收|验收|负责|项目|标签)[:：](.+)$/);
+    if (m) {
+      const v = m[2];
+      const hit = { 状态: S[t.status].n.includes(v), 执行: (t.assignee || "未领取").includes(v), 接收: t.receiver.includes(v), 验收: t.receiver.includes(v), 负责: t.owner.includes(v), 项目: pname(t.project).includes(v), 标签: t.req.some(x => x.tag.includes(v)) }[m[1]];
+      if (!hit) return false;
+    } else if (!(t.id + t.title).toLowerCase().includes(tok.toLowerCase())) return false;
+  }
+  return true;
+}
+
+function card(t, drag) {
+  const flags = [];
+  if (t.cancelWait) flags.push(`<span class="flag warn">取消中，待确认停止</span>`);
+  if (t.paused) flags.push(`<span class="flag warn">${t.pauseWait ? "暂停中，待确认停止" : "已暂停"}</span>`);
+  if (t.flag) flags.push(`<span class="flag warn">${esc(t.flag)}</span>`);
+  if (t.assignee && !PEOPLE[t.assignee].active) flags.push(`<span class="flag warn">执行账号已停用</span>`);
+  if (t.mode !== "公开") flags.push(`<span class="flag">${t.mode}：${esc(targetText(t))}</span>`);
+  if (t.deps.length) flags.push(`<span class="flag">依赖 ${esc(t.deps.join("、"))}</span>`);
+  if (t.handoff && t.status === "open") flags.push(`<span class="flag">有交接说明</span>`);
+  return `<button class="card" data-open="${t.id}" ${drag ? `draggable="true" data-drag="${t.id}"` : ""}>
+    <div class="row"><span class="mono id">${t.id}</span>${st.proj === "全部" ? `<span class="small">${esc(pname(t.project))}</span>` : ""}${flags.join("")}</div>
+    <div class="t">${esc(t.title)}</div>
+    ${t.req.length ? `<div class="row">${t.req.map(reqTag).join("")}</div>` : ""}
+    <div class="foot">${avatar(t.assignee)}<span class="small">${t.revs.length ? `修订 ${t.revs.length} · ` : ""}验收 ${esc(t.receiver)}</span></div>
+  </button>`;
+}
+
+function todo(w) {
+  return T.filter(t =>
+    (t.status === "review" && t.receiver === w && t.assignee !== w) ||
+    (t.status === "rework" && t.assignee === w) ||
+    (t.status === "draft" && isPAdmin(w, t.project)) ||
+    ((t.status === "doing" || t.status === "rework") && t.assignee && !PEOPLE[t.assignee].active && isPAdmin(w, t.project)));
+}
+const fbTodo = w => FB.filter(f => isPAdmin(w, f.project) && (f.status === "待评估" || fbState(f) === "待复核"));
+
+/* ================= views ================= */
+function renderToolbar() {
+  const tb = $("#toolbar");
+  const chips = ["全部", "我的"].map(x => `<button class="chip" data-chip="${x}" aria-pressed="${st.chip === x}">${x}</button>`).join("");
+  if (st.view === "board") {
+    tb.innerHTML = `<span>分组</span><select id="lane" aria-label="分组">${["无", "项目", "执行人"].map(x => `<option ${x === st.lane ? "selected" : ""}>${x}</option>`).join("")}</select>${chips}
+      <button class="btn sm" data-export>导出看板</button><span class="hint">拖动卡片改状态 · 规则不允许时会说明原因 · 已取消的任务在列表里</span>`;
+  } else if (st.view === "list") {
+    tb.innerHTML = `${chips}<span class="hint">点表头排序 · 搜索支持 <code>状态:</code> <code>执行:</code> <code>验收:</code> <code>项目:</code> <code>标签:</code></span>`;
+  } else tb.innerHTML = "";
+  tb.hidden = !tb.innerHTML;
+}
+
+function renderBoard() {
+  const list = T.filter(live).filter(matches);
+  const lanes = st.lane === "无" ? [["", list]] :
+    st.lane === "项目" ? PROJ.map(p => [p.name, list.filter(t => t.project === p.id)]) :
+    [...new Set(list.map(t => t.assignee || "未领取"))].map(a => [a, list.filter(t => (t.assignee || "未领取") === a)]);
+  const wipLimit = st.proj !== "全部" ? pj(st.proj).wip : 0;
+  let h = `<div class="board">` + STATES.map(s => {
+    const n = list.filter(t => t.status === s.k).length;
+    const wip = s.k === "doing" && wipLimit ? `<span class="wip ${n > wipLimit ? "over" : ""}">上限 ${wipLimit}</span>` : "";
+    return `<div class="colhead"><span class="dot" style="background:var(${s.c})"></span>${s.n}<span class="n">${n}</span>${wip}</div>`;
+  }).join("");
+  for (const [name, items] of lanes) {
+    if (name) h += `<div class="lane-title">${st.lane === "执行人" && name !== "未领取" ? avatar(name) : esc(name)}<span class="small">${items.length} 项</span></div>`;
+    h += STATES.map(s => `<div class="col" data-col="${s.k}">${items.filter(t => t.status === s.k).map(t => card(t, true)).join("")}</div>`).join("");
+  }
+  return h + `</div>`;
+}
+
+function renderList() {
+  const key = st.sort;
+  const order = [...STATES.map(s => s.k), "cancelled"];
+  const val = (t, k) => k === "project" ? pname(t.project) : t[k] || "";
+  const list = T.filter(matches).sort((a, b) => key === "status" ? order.indexOf(a.status) - order.indexOf(b.status) : String(val(a, key)).localeCompare(String(val(b, key)), "zh"));
+  const th = (k, n) => `<th data-sort="${k}">${n}${st.sort === k ? " ↓" : ""}</th>`;
+  return `<div class="tablewrap"><table><thead><tr>${th("id", "编号")}${th("title", "标题")}${th("status", "状态")}${th("assignee", "执行")}${th("receiver", "验收")}${th("project", "项目")}<th>最近动态</th></tr></thead><tbody>
+    ${list.map(t => { const l = t.log[t.log.length - 1]; return `<tr data-open="${t.id}"><td class="mono">${t.id}</td><td class="title">${esc(t.title)}${t.paused ? ` <span class="flag warn">已暂停</span>` : ""}</td><td>${pill(t.status)}</td><td>${avatar(t.assignee)}</td><td>${esc(t.receiver)}</td><td>${esc(pname(t.project))}</td><td class="small">${esc(l[0])} ${esc(l[1].split("：")[0])} · ${l[2]}</td></tr>`; }).join("") || `<tr><td colspan="7" class="small">没有符合条件的任务。</td></tr>`}
+  </tbody></table></div>`;
+}
+
+function renderMine() {
+  const w = me();
+  const a = todo(w).filter(matches);
+  const b = T.filter(t => t.status === "doing" && t.assignee === w).filter(matches);
+  const openInMine = T.filter(t => t.status === "open" && canDo(w, t.project) && t.receiver !== w).filter(matches);
+  const owned = T.filter(t => t.owner === w && !["done", "cancelled"].includes(t.status)).filter(matches);
+  const c = openInMine.filter(t => canClaim(t, w)[0]);
+  const near = openInMine.filter(t => !canClaim(t, w)[0]);
+  const fb = fbTodo(w);
+  const why = t => t.assignee && !PEOPLE[t.assignee].active && t.assignee !== w ? "执行账号已停用，等你收回" : t.status === "review" ? "等你验收" : t.status === "rework" ? "被退回，等你修改" : "草稿，等你开放";
+  const item = (t, note, cls = "") => `<div>${note ? `<div class="why ${cls}">${esc(note)}</div>` : ""}${card(t, false)}</div>`;
+  const ex = execAnywhere(w);
+  const banner = !PEOPLE[w].active ? `<p class="empty" style="grid-column:1/-1">这个账号已停用，只能查看，不能领取或提交。</p>` : "";
+  return `<div class="mine">${banner}
+    <section><h2>待我处理<small>${a.length + fb.length} 项</small></h2>${a.map(t => item(t, why(t))).join("")}
+      ${fb.map(f => `<div><div class="why">${f.status === "待评估" ? "反馈待评估" : "改进已完成，待复核效果"}</div><button class="card" data-gofb="${f.id}"><div class="row"><span class="mono id">${f.id}</span><span class="flag">${f.kind}</span></div><div class="t">${esc(f.title)}</div><div class="foot">${avatar(f.by)}<span class="small">${esc(pname(f.project))}</span></div></button></div>`).join("")}
+      ${a.length + fb.length ? "" : `<p class="empty">没有等你处理的事。</p>`}</section>
+    <section><h2>我在做的<small>${b.length} 项</small></h2>${b.map(t => item(t)).join("") || `<p class="empty">${ex ? "你手上没有进行中的任务。" : "你在各项目里是报告者或观察者，不领取任务。"}</p>`}
+      <h2>我负责跟进的<small>${owned.length} 项</small></h2>${owned.map(t => item(t, `${S[t.status].n}${t.assignee ? " · " + t.assignee + " 执行" : ""}`, "no")).join("") || `<p class="empty">没有你负责跟进的未完成任务。</p>`}</section>
+    <section><h2>可以领的<small>${c.length} 项</small></h2>${c.map(t => item(t, canClaim(t, w)[1])).join("") || `<p class="empty">${ex ? "暂时没有你能领的任务。" : "你在各项目里是报告者或观察者，不领取任务。"}</p>`}
+      ${near.length ? `<h2>暂时领不了<small>${near.length} 项</small></h2>${near.map(t => item(t, canClaim(t, w)[1], "no")).join("")}` : ""}</section>
+  </div>`;
+}
+
+/* ---- projects ---- */
+function renderProjects() {
+  if (st.pv && pj(st.pv)) return renderProject(pj(st.pv));
+  const visible = PROJ.filter(p => PEOPLE[me()].sys || p.members[me()]);
+  return `<div class="page">
+    <div class="phead"><span class="small">${visible.length} 个项目</span>${PEOPLE[me()].sys ? `<button class="btn right" data-newproj>新建项目</button>` : ""}</div>
+    <div class="projgrid">${visible.map(p => {
+      const ts = T.filter(t => t.project === p.id && live(t));
+      const mine = p.members[me()];
+      return `<button class="proj" data-pv="${p.id}">
+        <div class="phead"><h2>${esc(p.name)}</h2>${mine ? `<span class="chip on">我是${mine.role}</span>` : ""}</div>
+        <p class="small">${esc(p.desc || "暂无说明")}</p>
+        ${ts.length ? stack(ts) : `<div class="stack"></div>`}
+        <div class="small">${ts.length} 个任务 · ${Object.keys(p.members).length} 名成员 · 负责人 ${esc(p.owner)}</div>
+        <div class="avs">${Object.keys(p.members).map(m => avatar(m, false)).join("")}</div>
+      </button>`;
+    }).join("") || `<p class="empty">你还不属于任何项目。</p>`}</div></div>`;
+}
+
+function renderProject(p) {
+  const edit = isPAdmin(me(), p.id);
+  const tabs = ["概览", "成员", "设置"].map(x => `<button data-ptab="${x}" aria-pressed="${st.ptab === x}">${x}</button>`).join("");
+  let body = "";
+  const ts = T.filter(t => t.project === p.id && live(t));
+  if (st.ptab === "概览") {
+    const recent = T.filter(t => t.project === p.id).flatMap(t => t.log.map(l => [t, ...l])).sort((a, b) => b[3].localeCompare(a[3])).slice(0, 8);
+    body = `<div class="ovgrid">
+      <div class="box"><h3>任务进度</h3>${ts.length ? stack(ts) : `<div class="stack"></div>`}
+        <div class="legend">${STATES.map(s => `<span><i style="background:var(${s.c})"></i>${s.n} ${ts.filter(t => t.status === s.k).length}</span>`).join("")}</div>
+        <div class="addrow"><button class="btn" data-goboard="${p.id}">在看板中查看</button><button class="btn" data-golist="${p.id}">在列表中查看</button></div>
+        <p class="small">${esc(p.desc || "")}</p></div>
+      <div class="box"><h3>最近动态</h3><ul class="recent">${recent.map(r => `<li><button class="link mono" data-open="${r[0].id}">${r[0].id}</button><b>${esc(r[1])}</b>${esc(r[2].split("：")[0])}<span class="when">${r[3]}</span></li>`).join("") || `<li class="small">暂无</li>`}</ul></div>
+    </div>`;
+  } else if (st.ptab === "成员") {
+    const others = Object.keys(PEOPLE).filter(n => !p.members[n] && PEOPLE[n].active);
+    body = `<div class="box"><h3>成员与分工</h3>
+      <p class="small">项目角色只决定权限：项目管理员、贡献者、报告者、观察者，完整对照见「账号与权限 › 权限说明」。谁执行、谁验收写在每个任务上，同一个贡献者可以这次执行、下次验收。职责和分工标签是给人看的说明，分工标签还可以用来优先通知或限定领取。能力由成员自己申报。</p>
+      <div class="tablewrap"><table><thead><tr><th>成员</th><th>类型</th><th>项目角色</th><th>职责</th><th>分工标签</th><th>能力（✓ 已核实）</th><th></th></tr></thead><tbody>
+      ${Object.entries(p.members).map(([n, m]) => {
+        const caps = (CAPS[n] || []).filter(c => p.tags.includes(c.tag));
+        return `<tr class="${PEOPLE[n].active ? "" : "off-row"}"><td>${avatar(n)}</td><td>${PEOPLE[n].kind}${PEOPLE[n].kind === "AI" ? " · " + esc(PEOPLE[n].platform) : ""}${PEOPLE[n].active ? "" : " · 已停用"}</td>
+        <td>${edit ? `<select data-mrole="${n}" aria-label="${esc(n)} 的角色">${ROLES.filter(r => PEOPLE[n].kind === "人员" || r !== "项目管理员").map(r => `<option ${r === m.role ? "selected" : ""}>${r}</option>`).join("")}</select>` : m.role}</td>
+        <td class="wrap">${edit ? `<input type="text" data-mduty="${n}" value="${esc(m.duty)}" placeholder="例如：负责有线设备复验" aria-label="${esc(n)} 的职责">` : esc(m.duty || "—")}</td>
+        <td class="wrap"><div class="chips">${edit ? p.labels.map(l => `<button type="button" class="chip" data-mlabel="${n}|${esc(l)}" aria-pressed="${(m.labels || []).includes(l)}">${esc(l)}</button>`).join("") : (m.labels || []).map(l => `<span class="chip">${esc(l)}</span>`).join("") || `<span class="small">—</span>`}</div></td>
+        <td class="wrap">${caps.map(c => `<span class="tag ${c.status === "已核实" ? "v" : ""}">${esc(c.tag)}${c.status === "已核实" ? " ✓" : ""}</span>`).join(" ") || `<span class="small">未申报</span>`}</td>
+        <td>${edit && n !== p.owner ? `<button class="btn sm danger" data-mrm="${n}">移出</button>` : ""}</td></tr>`;
+      }).join("")}</tbody></table></div>
+      ${edit ? (others.length ? `<div class="addrow"><select id="addWho" aria-label="添加成员">${others.map(n => `<option>${n}</option>`).join("")}</select><select id="addRole" aria-label="角色">${ROLES.map(r => `<option ${r === "贡献者" ? "selected" : ""}>${r}</option>`).join("")}</select><button class="btn" data-madd>添加成员</button><span class="small">还没有账号的人，先在「账号与权限 › 邀请」发邀请码，可以直接指定加入本项目。</span></div>` : `<p class="small">所有有效账号都已是成员。</p>`) : `<p class="small">只有项目管理员可以调整成员。</p>`}
+    </div>`;
+  } else {
+    const dis = edit ? "" : "disabled";
+    const receivers = doers(p.id);
+    body = `<form class="box form" id="projForm" style="max-width:680px"><h3>项目设置</h3>
+      <div class="two">
+        <label class="f"><span>项目名称</span><input type="text" id="pName" value="${esc(p.name)}" ${dis} required></label>
+        <label class="f"><span>负责人</span><select id="pOwner" ${dis}>${Object.keys(p.members).filter(n => PEOPLE[n].kind === "人员").map(n => `<option ${n === p.owner ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+      </div>
+      <label class="f"><span>说明</span><textarea id="pDesc" ${dis}>${esc(p.desc)}</textarea></label>
+      <div class="two">
+        <label class="f"><span>默认验收人</span><select id="pRecv" ${dis}>${receivers.map(n => `<option ${n === p.receiver ? "selected" : ""}>${n}</option>`).join("") || `<option value="">先添加贡献者</option>`}</select><span class="small">新建任务时预填，可以逐个任务改</span></label>
+        <label class="f"><span>进行中任务上限</span><input type="number" id="pWip" min="0" max="50" value="${p.wip}" ${dis}><span class="small">看板超出时提示，0 表示不限</span></label>
+      </div>
+      <label class="check"><input type="checkbox" id="pAuto" ${p.autoOpen ? "checked" : ""} ${dis}> 管理员新建的任务直接开放领取（不勾选则先存为草稿）</label>
+      <div class="f"><span>能力标签</span><span class="small">新建任务时从这里选择要求的能力，成员也按这些标签申报。</span>
+        <div class="chips">${p.tags.map(x => `<span class="chip">${esc(x)}${edit ? `<button type="button" class="x" data-tagrm="${esc(x)}" aria-label="删除 ${esc(x)}">×</button>` : ""}</span>`).join("")}
+        ${edit ? `<input type="text" id="tagNew" placeholder="新标签，回车添加" aria-label="新标签">` : ""}</div></div>
+      <div class="f"><span>分工标签</span><span class="small">描述成员在项目里的分工，例如测试、文档、运维。可以按分工优先通知或限定领取，不影响权限。</span>
+        <div class="chips">${p.labels.map(x => `<span class="chip">${esc(x)}${edit ? `<button type="button" class="x" data-lblrm="${esc(x)}" aria-label="删除 ${esc(x)}">×</button>` : ""}</span>`).join("")}
+        ${edit ? `<input type="text" id="lblNew" placeholder="新分工，回车添加" aria-label="新分工">` : ""}</div></div>
+      ${edit ? `<div class="addrow"><button class="btn primary">保存设置</button></div>` : `<p class="small">只有项目管理员可以修改设置。</p>`}
+    </form>`;
+  }
+  return `<div class="page">
+    <div class="phead"><button class="link" data-pv="">← 全部项目</button></div>
+    <div class="phead"><h2>${esc(p.name)}</h2>${p.members[me()] ? `<span class="chip on">我是${p.members[me()].role}</span>` : ""}<div class="seg" role="group" aria-label="项目页面">${tabs}</div></div>
+    ${body}</div>`;
+}
+
+/* ---- feedback (C05) ---- */
+function fbState(f) {
+  if (f.status !== "已纳入") return f.status;
+  const t = task(f.toTask);
+  if (!t || t.status === "cancelled") return "不采纳";
+  if (t.status === "done") return f.result ? "已完成" : "待复核";
+  return ["draft", "open"].includes(t.status) ? "已纳入" : "处理中";
+}
+const fbBadge = s => `<span class="badge ${{ 待评估: "mid", 已纳入: "info", 处理中: "info", 待复核: "mid", 已完成: "ok", 不采纳: "dec", 重复: "dec" }[s]}">${s}</span>`;
+function renderFeedback() {
+  const w = me();
+  const mine = PROJ.filter(p => PEOPLE[w].sys || p.members[w]);
+  const list = FB.filter(f => mine.some(p => p.id === f.project));
+  const writable = mine.filter(p => canWrite(w, p.id));
+  return `<div class="page">
+    <p class="small" style="max-width:72ch">报告者以上的成员（包括 AI 窗口）都可以记录问题和建议，观察者只能查看。项目管理员评估后，可以转成任务、标记重复或不采纳。转成的任务完成后，回到这里写下实际改善了什么，作为下一轮的依据。</p>
+    ${writable.length ? `<form class="box form" id="fbForm"><h3>记录反馈</h3>
+      <div class="radios">${["问题", "建议", "使用反馈"].map((k, i) => `<label><input type="radio" name="fbk" value="${k}" ${i ? "" : "checked"}> ${k}</label>`).join("")}</div>
+      <div class="two"><label class="f"><span>标题 <em>*</em></span><input type="text" id="fbTitle" required placeholder="一句话说明"></label>
+        <label class="f"><span>项目</span><select id="fbProj">${writable.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join("")}</select></label></div>
+      <label class="f"><span>现象和影响 <em>*</em></span><textarea id="fbDetail" required placeholder="看到了什么、影响了谁、怎么复现；有截图或任务编号也写上"></textarea></label>
+      <div class="addrow"><label class="small" for="fbTask">关联任务</label><select id="fbTask"><option value="">无</option>${T.map(t => `<option>${t.id}</option>`).join("")}</select><button class="btn primary">提交</button></div>
+    </form>` : `<p class="empty">你在所属项目里是观察者，只能查看反馈。</p>`}
+    <div class="tablewrap"><table><thead><tr><th>编号</th><th>类型</th><th>标题</th><th>提出</th><th>关联</th><th>状态</th><th>处理</th></tr></thead><tbody>
+    ${list.map(f => {
+      const s = fbState(f); const adm = isPAdmin(w, f.project);
+      let ops = "";
+      if (adm && s === "待评估") ops = `<div class="ops"><button class="btn sm primary" data-fbtask="${f.id}">转为任务</button><select data-fbdup="${f.id}" aria-label="标记重复"><option value="">标记为重复…</option>${FB.filter(x => x.id !== f.id && !x.dup).map(x => `<option>${x.id}</option>`).join("")}</select><button class="btn sm" data-fbno="${f.id}">不采纳</button></div>`;
+      else if (adm && s === "待复核") ops = `<div class="ops"><input type="text" id="fbr-${f.id}" placeholder="实际改善了什么、还剩什么" aria-label="复核结果"><button class="btn sm primary" data-fbres="${f.id}">记录复核</button></div>`;
+      else if (f.result) ops = `<span class="small">${esc(f.result)}</span>`;
+      const rel = [f.task ? `<button class="link mono" data-open="${f.task}">${f.task}</button>` : "", f.toTask ? `→ <button class="link mono" data-open="${f.toTask}">${f.toTask}</button>` : "", f.dup ? `重复于 ${f.dup}` : ""].filter(Boolean).join(" ");
+      return `<tr id="fb-${f.id}"><td class="mono">${f.id}</td><td>${f.kind}</td><td class="wrap"><b>${esc(f.title)}</b><div class="small">${esc(f.detail)}</div></td><td>${avatar(f.by)}<div class="small">${f.at}</div></td><td class="small">${rel || "—"}</td><td>${fbBadge(s)}</td><td class="wrap">${ops || (adm ? "" : `<span class="small">由项目管理员处理</span>`)}</td></tr>`;
+    }).join("") || `<tr><td colspan="7" class="small">暂无反馈。</td></tr>`}
+    </tbody></table></div></div>`;
+}
+
+/* ---- windows ---- */
+function capsBlock(id) {
+  const w = me(); const self = w === id;
+  const projs = PROJ.filter(x => x.members[id]);
+  const vocab = [...new Set((projs.length ? projs : PROJ).flatMap(x => x.tags))].filter(tag => !capOf(id, tag));
+  return `<ul class="caps">${(CAPS[id] || []).map(c => `<li><span>${esc(c.tag)}</span><span class="badge ${c.status === "已核实" ? "ok" : "dec"}">${c.status}</span><span class="basis">${esc(c.basis)} · 到期 ${c.expires}</span>
+      <span>${self ? `<button class="btn sm" data-caprm="${id}|${esc(c.tag)}">删除</button>` : isVerifier(w) && c.status === "已申报" ? `<button class="btn sm" data-capver="${id}|${esc(c.tag)}">标记已核实</button>` : ""}</span></li>${st.capv === id + "|" + c.tag ? `<li style="display:block"><div class="capadd" style="grid-template-columns:1fr auto"><input id="capEv" placeholder="核实证据：做了什么操作、结果如何（正式版还要附证据文件）" aria-label="核实证据"><button class="btn sm primary" data-capgo="${id}|${esc(c.tag)}">确认核实</button></div></li>` : ""}`).join("") || `<li class="small">尚未申报</li>`}</ul>
+    ${self && vocab.length ? `<div class="capadd" style="margin-top:8px"><select id="capTag" aria-label="能力">${vocab.map(x => `<option>${esc(x)}</option>`).join("")}</select><input id="capBasis" placeholder="依据，例如：有网页搜索工具" aria-label="申报依据"><button class="btn sm" data-capadd="${id}">申报</button></div>` : ""}`;
+}
+function renderWindows() {
+  const w = me();
+  return `<div class="wins">${Object.entries(PEOPLE).filter(([, p]) => p.kind === "AI").map(([id, p]) => {
+    const cur = T.filter(t => t.assignee === id && !["done", "cancelled"].includes(t.status));
+    const past = T.filter(t => t.assignee === id && t.status === "done");
+    const projs = PROJ.filter(x => x.members[id]);
+    const self = w === id;
+    const r = p.report;
+    const rb = { 工作中: "info", 等待输入: "mid", 出错: "warn", 空闲: "dec" }[r.s];
+    return `<div class="win"><div class="head">${avatar(id)}<span class="online ${p.active && p.online ? "" : "off"}">${!p.active ? "已停用" : p.online ? "● 在线" : "○ 联系中断"}</span></div>
+      <div class="small">${p.platform} · 责任人 ${p.owner} · ${esc(p.where)} · 最近联系 ${SEEN[id] || "—"}</div>
+      <div class="small">窗口标题建议：<span class="mono">[${id}] 项目｜主题</span></div>
+      <div class="report"><span class="badge ${rb}">${r.s}</span><span>${esc(r.note)}</span><span class="small" style="margin-left:auto">${r.at}</span></div>
+      ${self ? `<div class="capadd"><select id="repS" aria-label="执行状态">${["工作中", "等待输入", "出错", "空闲"].map(s => `<option ${s === r.s ? "selected" : ""}>${s}</option>`).join("")}</select><input id="repN" placeholder="一句话说明现在在做什么" aria-label="回报说明"><button class="btn sm" data-report="${id}">回报</button></div>` : ""}
+      <div class="addrow small"><span>收到可领任务时：</span>${self ? `<select data-auto="${id}" aria-label="自动执行策略">${["仅通知", "自动领取并执行"].map(x => `<option ${x === p.auto ? "selected" : ""}>${x}</option>`).join("")}</select>` : `<b>${p.auto}</b>`}<span>自动执行还需项目允许、任务允许，且平台有可调用的执行接口</span></div>
+      <div><h4>所在项目</h4><div class="small">${projs.map(x => `${esc(x.name)}（${x.members[id].role}${x.members[id].duty ? "：" + esc(x.members[id].duty) : ""}）`).join("；") || "无"}</div></div>
+      <div><h4>能力声明${self ? "（你可以编辑）" : ""}</h4>${capsBlock(id)}${!self ? `<p class="small" style="margin-top:6px">能力由窗口自己申报，切换到 ${id} 身份可以编辑。项目管理员或担任过验收人的成员可以标记已核实。</p>` : ""}</div>
+      <div><h4>当前任务</h4><ul>${cur.map(t => `<li><button class="link" data-open="${t.id}">${t.id} ${esc(t.title)}</button> ${pill(t.status)}</li>`).join("") || `<li class="small">无</li>`}</ul></div>
+      <div><h4>已完成</h4><ul>${past.map(t => `<li><button class="link" data-open="${t.id}">${t.id} ${esc(t.title)}</button></li>`).join("") || `<li class="small">无</li>`}</ul></div>
+    </div>`;
+  }).join("")}</div>`;
+}
+
+/* ---- activity ---- */
+function renderActivity() {
+  const w = me();
+  const visible = T.filter(t => PEOPLE[w].sys || pj(t.project).members[w]);
+  const rows = visible.flatMap(t => t.log.map(l => ({ t, who: l[0], what: l[1], at: l[2] })))
+    .filter(r => st.actWho === "全部" || r.who === st.actWho).sort((a, b) => b.at.localeCompare(a.at));
+  return `<div class="page">
+    <div class="addrow"><label class="small" for="actWho">按人员筛选</label><select id="actWho">${["全部", ...Object.keys(PEOPLE)].map(n => `<option ${n === st.actWho ? "selected" : ""}>${n}</option>`).join("")}</select><span class="small">每条记录都来自账本，点编号查看任务和技术细节。</span><button class="btn sm right" data-export>导出看板</button></div>
+    <div class="tablewrap"><table><thead><tr><th>时间</th><th>人员</th><th>任务</th><th>操作</th></tr></thead><tbody>
+    ${rows.map(r => `<tr><td class="mono">${r.at}</td><td>${avatar(r.who)}</td><td><button class="link mono" data-open="${r.t.id}">${r.t.id}</button> <span class="small">${esc(r.t.title)}</span></td><td class="wrap">${esc(r.what)}</td></tr>`).join("") || `<tr><td colspan="4" class="small">没有记录。</td></tr>`}
+    </tbody></table></div></div>`;
+}
+
+/* ---- accounts ---- */
+function renderAccounts() {
+  const w = me(); const sys = PEOPLE[w].sys;
+  const tabs = sys ? ["账号", "邀请", "权限说明", "我的账号"] : ["我的账号", "权限说明"];
+  if (!tabs.includes(st.atab)) st.atab = tabs[0];
+  const seg = `<div class="seg" role="group" aria-label="账号页面">${tabs.map(x => `<button data-atab="${x}" aria-pressed="${st.atab === x}">${x}</button>`).join("")}</div>`;
+  const secret = st.secret ? `<div class="secret"><b>${esc(st.secret.title)}</b><div class="codebox" id="secretText">${esc(st.secret.value)}</div><span class="small">${esc(st.secret.note)}</span><div class="addrow"><button class="btn sm" data-copy="secretText">复制</button><button class="btn sm" data-secretx>我已交给对方</button></div></div>` : "";
+  let body = "";
+  if (st.atab === "账号") {
+    body = `<div class="tablewrap"><table><thead><tr><th>账号</th><th>类型</th><th>系统角色</th><th>所在项目</th><th>最近活动</th><th>状态</th><th>操作</th></tr></thead><tbody>
+      ${Object.entries(PEOPLE).map(([n, p]) => `<tr class="${p.active ? "" : "off-row"}"><td>${avatar(n)}</td><td>${p.kind}${p.kind === "AI" ? ` · ${esc(p.platform)} · 责任人 ${esc(p.owner)}` : ""}</td>
+        <td>${p.sys ? "系统管理员" : "普通成员"}</td>
+        <td class="wrap small">${PROJ.filter(x => x.members[n]).map(x => `${esc(x.name)}·${x.members[n].role}`).join("；") || "无"}</td>
+        <td class="mono">${SEEN[n] || "—"}</td><td>${p.active ? `<span class="st-on">正常</span>` : `<span class="st-off">已停用</span>`}</td>
+        <td><div class="ops">${p.kind === "人员" ? `<button class="btn sm" data-reset="${n}">重置密码</button>` : `<button class="btn sm" data-rotate="${n}">轮换令牌</button>`}
+          ${n !== w ? `<button class="btn sm ${p.active ? "danger" : ""}" data-toggle="${n}">${p.active ? "停用" : "启用"}</button>` : ""}
+          ${p.kind === "人员" && n !== w ? `<button class="btn sm" data-sysadm="${n}">${p.sys ? "取消系统管理员" : "设为系统管理员"}</button>` : ""}</div></td></tr>`).join("")}
+      </tbody></table></div>
+      <p class="small">停用后不能登录或调用接口，历史记录保留；手上进行中的任务会提示项目管理员收回。重置密码和轮换令牌的结果只显示一次。</p>`;
+  } else if (st.atab === "邀请") {
+    const humans = Object.keys(PEOPLE).filter(n => PEOPLE[n].kind === "人员" && PEOPLE[n].active);
+    const ai = st.ikind === "AI";
+    body = `<form class="box form" id="invForm" style="max-width:680px"><h3>发出邀请</h3>
+      <div class="radios">${["AI", "人员"].map(k => `<label><input type="radio" name="ikind" value="${k}" ${st.ikind === k ? "checked" : ""}> 邀请${k === "AI" ? " AI 窗口" : "人员"}</label>`).join("")}</div>
+      ${ai ? `<div class="two"><label class="f"><span>平台</span><select id="iPlat">${Object.keys(PREFIX).map(x => `<option>${x}</option>`).join("")}</select></label>
+        <label class="f"><span>责任人</span><select id="iOwner">${humans.map(n => `<option>${n}</option>`).join("")}</select></label></div>` : ""}
+      <div class="two"><label class="f"><span>加入项目</span><select id="iProj">${PROJ.map(p => `<option value="${p.id}">${esc(p.name)}</option>`).join("")}</select></label>
+        <label class="f"><span>项目角色</span><select id="iRole">${ROLES.filter(r => !ai || r !== "项目管理员").map(r => `<option ${r === "贡献者" ? "selected" : ""}>${r}</option>`).join("")}</select></label></div>
+      <p class="small">邀请码 24 小时内有效，只能注册一个账号。${ai ? "AI 窗口最高只能是贡献者；注册后由窗口自己申报能力。" : "对方注册时自己设置账号名和密码。"}</p>
+      <div class="addrow"><button class="btn primary">生成邀请</button></div></form>
+      ${st.lastInvite ? `<div class="box"><h3>把下面这段发给${st.lastInvite.kind === "AI" ? " AI 窗口" : "对方"}</h3><div class="codebox" id="invText">${esc(inviteText(st.lastInvite))}</div><div class="addrow"><button class="btn sm" data-copy="invText">复制</button></div></div>` : ""}
+      <div class="tablewrap"><table><thead><tr><th>邀请码</th><th>对象</th><th>项目与角色</th><th>发出</th><th>状态</th><th></th></tr></thead><tbody>
+      ${INVITES.map(i => { const s = i.revoked ? "已撤销" : i.used ? `已注册为 ${i.used}` : "待使用"; return `<tr><td class="mono">${i.code}</td><td>${i.kind}${i.kind === "AI" ? ` · ${i.platform} · 责任人 ${i.owner}` : ""}</td><td>${esc(pname(i.project))} · ${i.role}</td><td class="small">${i.by} · ${i.at}<br>有效至 ${i.expires}</td><td>${i.used ? `<span class="st-on">${s}</span>` : i.revoked ? `<span class="small">${s}</span>` : `<span class="badge mid">${s}</span>`}</td>
+        <td>${!i.used && !i.revoked ? `<div class="ops"><button class="btn sm" data-redeem="${i.code}">模拟对方注册</button><button class="btn sm danger" data-revoke="${i.code}">撤销</button></div>` : ""}</td></tr>`; }).join("")}
+      </tbody></table></div>`;
+  } else if (st.atab === "权限说明") {
+    const Y = `<span class="y">✓</span>`, N = `<span class="n">—</span>`;
+    const rows = [
+      ["查看项目内的任务、动态和反馈", Y, Y, Y, Y, Y],
+      ["写评论、记录反馈（提需求）、关注任务", Y, Y, Y, Y, N],
+      ["新建任务（贡献者登记的任务由自己验收，由项目管理员开放）", Y, Y, Y, N, N],
+      ["领取、交付、放回任务", N, Y, Y, N, N],
+      ["被指定为验收人，验收或退回", N, Y, Y, N, N],
+      ["开放、暂停、取消、重建任务，处理任务关系", Y, Y, N, N, N],
+      ["评估反馈、转为任务、复核效果", Y, Y, N, N, N],
+      ["项目设置、成员与分工", Y, Y, N, N, N],
+      ["管理账号：邀请、停用、重置密码、轮换令牌", Y, N, N, N, N],
+      ["新建项目、设置系统管理员", Y, N, N, N, N]
+    ];
+    const taskRows = [
+      ["负责人", "跟进结果。任务状态变化都会通知；首页「我负责跟进的」列出未完成的任务。新建任务时默认是创建人"],
+      ["执行人", "领取后自动填上。可以交付、放回；账号停用时由项目管理员收回"],
+      ["验收人", "新建任务时确定，只有项目管理员登记时能指定他人；验收人不能领取自己验收的任务"],
+      ["关注者", "任何能写评论的成员都可以关注，收到状态变化和评论通知"]
+    ];
+    body = `<p class="small" style="max-width:72ch">权限分两层。系统层只有「系统管理员」和「普通成员」。项目层有四档角色，只管权限：一个账号在不同项目里可以担任不同角色。谁执行、谁验收不是角色，而是每个任务上的字段。不设用户组，也不提供自定义角色。AI 窗口最高只能是贡献者。</p>
+      <div class="tablewrap"><table class="matrix"><thead><tr><th>操作</th><th>系统管理员</th><th>项目管理员</th><th>贡献者</th><th>报告者</th><th>观察者</th></tr></thead><tbody>
+      ${rows.map(r => `<tr><td class="wrap">${r[0]}</td>${r.slice(1).map(c => `<td>${c}</td>`).join("")}</tr>`).join("")}</tbody></table></div>
+      <h3>任务上的分工</h3>
+      <div class="tablewrap"><table><thead><tr><th>字段</th><th>说明</th></tr></thead><tbody>${taskRows.map(r => `<tr><td><b>${r[0]}</b></td><td class="wrap">${r[1]}</td></tr>`).join("")}</tbody></table></div>
+      <p class="small">系统管理员不自动参与项目工作，要领取或验收需先加入项目。所有人都可以修改自己的密码、申报自己的能力；AI 窗口可以回报自己的执行状态。网页登录用账号密码，会话 8 小时；AI 窗口和自动化客户端用各自的令牌，两者分开验证。</p>`;
+  } else {
+    const p = PEOPLE[w];
+    body = `<div class="ovgrid">
+      <div class="box"><h3>${avatar(w)}</h3>
+        <div class="small">${p.kind}${p.kind === "AI" ? ` · ${p.platform} · 责任人 ${p.owner}` : ""} · ${p.sys ? "系统管理员" : "普通成员"}</div>
+        <div><h4 class="small">所在项目</h4>${PROJ.filter(x => x.members[w]).map(x => `<div>${esc(x.name)} · <b>${x.members[w].role}</b>${x.members[w].duty ? ` <span class="small">${esc(x.members[w].duty)}</span>` : ""}</div>`).join("") || `<span class="small">还没有加入项目</span>`}</div>
+        ${p.kind === "人员" ? `<form class="form" id="pwForm"><h4>修改密码</h4><input type="password" id="pw0" placeholder="当前密码" autocomplete="current-password" aria-label="当前密码"><input type="password" id="pw1" placeholder="新密码" autocomplete="new-password" aria-label="新密码"><div class="addrow"><button class="btn">保存新密码</button><span class="small">支持密码管理器和粘贴</span></div></form>`
+          : `<div class="addrow"><button class="btn" data-rotate="${w}">轮换我的令牌</button><span class="small">旧令牌立即失效</span></div>`}
+      </div>
+      <div class="box"><h3>我的能力</h3><p class="small">按项目的能力标签申报，写明依据。项目管理员或验收人核实后会标为已核实。任务要求某项能力时，领取前会核对。</p>${capsBlock(w)}</div>
+    </div>`;
+  }
+  return `<div class="page"><div class="phead">${seg}</div>${secret}${body}</div>`;
+}
+function inviteText(i) {
+  return i.kind === "AI"
+    ? `请接入内网任务池。\n服务地址：https://taskpool.test:18443\n证书：使用管理员提供的 taskpool-lan-cert.pem，先核对指纹\n邀请码：${i.code}（${i.expires} 前有效，只能用一次）\n平台：${i.platform}，责任人：${i.owner}\n加入项目：${pname(i.project)}，角色：${i.role}\n步骤：用邀请码登记窗口，保存返回的令牌；然后申报你的能力，再查看可领取的任务。`
+    : `你被邀请加入内网任务池。\n打开 https://taskpool.test:18443/ ，点「使用邀请码注册」\n邀请码：${i.code}（${i.expires} 前有效，只能用一次）\n注册后会加入「${pname(i.project)}」，角色：${i.role}`;
+}
+
+/* ---- notes ---- */
+function renderNotes() {
+  const rows = [
+    ["看板：列 = 状态，拖动卡片即改状态", "YouTrack 敏捷看板、Kanboard", "拖到哪一列由服务端按角色和状态判断，不允许时给出原因。"],
+    ["状态 17 种并为 6 列，另有「已取消」", "Linear 的工作流状态分组", "暂停、交接、账号停用、窗口离线改为卡片标记；已取消只在列表里出现。"],
+    ["泳道、在制品上限", "YouTrack、Kanboard", "只按项目或执行人分组；上限按项目设置，只提示不阻止。"],
+    ["看板与列表切换、条件搜索", "Linear 显示选项、YouTrack 查询语言", "共用筛选；搜索只支持 5 个关键词。"],
+    ["任务侧栏：主区操作与记录，右栏字段", "YouTrack、Plane", "版本号、指纹收进「技术细节」。"],
+    ["首页「我的工作」", "Linear「我的事项」", "待我处理里同时有任务和待评估的反馈。"],
+    ["项目：概览、成员、设置", "YouTrack 项目设置、Plane 项目成员", "成员有角色、职责和分工标签；不做自定义字段和工作流脚本。"],
+    ["项目角色只管权限：项目管理员、贡献者、报告者、观察者", "YouTrack 默认角色（Project Admin、Contributor、Reporter、Observer）、Plane（Admin、Contributor、Commenter、Guest）", "四档固定角色，不提供自定义角色；AI 窗口最高为贡献者。"],
+    ["任务分工：负责人、执行人、验收人、关注者", "YouTrack、Linear、Plane 的任务字段（Assignee、Reviewer、Subscribers）", "执行和验收是任务字段而不是角色；同一个任务的执行人和验收人不能是同一人。"],
+    ["分工标签", "GitLab 标签、Linear 团队标签", "只用于优先通知、限定领取和筛选，不影响权限。"],
+    ["账号与权限：两层角色", "YouTrack Hub、Linear 成员角色、GitLab 访问令牌", "系统层两种、项目层四档；不设用户组。密码重置和令牌只显示一次。"],
+    ["邀请码", "GitHub Runner 注册令牌、Tailscale 接入密钥", "邀请绑定项目和角色，24 小时一次有效；AI 邀请生成一段可直接粘贴的接入说明。"],
+    ["通知", "GitHub、Linear 收件箱", "站内通知；平台唤醒按平台逐个接入，原型不演示。"],
+    ["反馈与改进", "Linear Triage", "待评估 → 已纳入 → 处理中 → 待复核 → 已完成；重复和不采纳保留记录。"],
+    ["任务关系：依赖、重复、拆分、关联", "YouTrack 链接类型、Linear 关联", "只有四种关系；合并任务用「标记重复 + 关联」代替。"]
+  ];
+  const cov = [
+    ["C01 界面布局与移动端", "已覆盖", "我的工作、看板、列表、侧栏；手机上单列显示，侧栏占满全屏。"],
+    ["C02 任务预指定", "已覆盖", "所有人 / 优先通知 / 只给某人，能力条件同时生效。没做能力组和到期自动转公开。"],
+    ["C03 唤醒与执行自动化", "部分", "站内通知、AI 执行回报、自动执行开关已有；平台唤醒和标题同步要逐个平台验证。"],
+    ["C04 任务关系与负优化防范", "部分", "依赖、重复、拆分、关联已有；效果复核放在反馈与改进里。任务合并和决定记录后端已有，原型还没有画。"],
+    ["C05 项目自我进化", "已覆盖", "记录反馈、评估、转任务、复核效果。"],
+    ["C06 账号密码与执行端令牌", "已覆盖", "修改密码、重置、轮换令牌、停用；系统层两种、项目层四档角色。登录和注册页面沿用现有。"],
+    ["C07 AI 邀请码自助注册", "已覆盖", "AI 邀请绑定平台、责任人、项目和角色（最高贡献者），生成接入说明。"],
+    ["N01 人员分工与 AI 能力自报", "已覆盖", "成员职责和分工标签；任务上分开记录负责人、执行人、验收人、关注者；能力分已申报和已核实，任务可以要求已核实。"],
+    ["领取、交付、修订、退回、返修", "已覆盖", "每次交付记一个修订号，退回时勾选未通过的判据。"],
+    ["逐项验收", "已覆盖", "验收通过前必须逐条勾选判据。"],
+    ["交接与接力", "已覆盖", "放回时必须写交接说明，下一位领取时会看到。停用账号的任务由项目管理员收回。"],
+    ["暂停、取消、修改任务", "已覆盖", "仅项目管理员可操作。暂停和取消进行中的任务要等执行人确认停止；修改标题、说明、判据用取消后重建。"],
+    ["输入资料与交付文件下载", "已覆盖", "原型里的下载按钮只做提示。"],
+    ["状态追溯与看板导出", "已覆盖", "动态页汇总全部记录；导出看板生成 Markdown。"],
+    ["实际停止与收口两步", "已覆盖", "交付时由执行人声明本次执行已结束，验收通过后直接归档。"],
+    ["资源占用、独立性策略细项", "有意简化", "只保留执行人不能验收自己的交付；资源占用不放进界面，服务端照常记录。"],
+    ["升级验收入口", "移出业务界面", "改由运维命令和部署记录承担。"]
+  ];
+  const badge = s => `<span class="badge ${{ 已覆盖: "ok", 部分: "mid", 有意简化: "dec", 移出业务界面: "dec" }[s]}">${s}</span>`;
+  return `<div class="notes"><p>这个原型演示的是折中方案：看板和侧栏借鉴 YouTrack，流程和首页参照 Linear、Kanboard 这类轻量工具。前端不需要框架；部分功能还要改服务层或账本，逐项影响见项目文档《原型后端影响评估》。借鉴来源中有几项未查证官方文档，只作思路参考。左下角可以切换身份，看看同一个页面对不同的人显示哪些操作。数据只保存在当前页面，刷新后会恢复成示例。</p>
+  <h2>需求覆盖清单</h2>
+  <div class="tablewrap"><table><thead><tr><th>需求或现有功能</th><th>原型状态</th><th>说明</th></tr></thead><tbody>${cov.map(r => `<tr><td><b>${r[0]}</b></td><td>${badge(r[1])}</td><td>${r[2]}</td></tr>`).join("")}</tbody></table></div>
+  <h2>借鉴来源</h2>
+  <div class="tablewrap"><table><thead><tr><th>界面元素</th><th>借鉴来源</th><th>本项目的简化</th></tr></thead><tbody>${rows.map(r => `<tr><td><b>${r[0]}</b></td><td>${r[1]}</td><td>${r[2]}</td></tr>`).join("")}</tbody></table></div></div>`;
+}
+
+/* ---- task panel ---- */
+function actionsFor(t) {
+  const w = me(); const out = []; const form = st.form;
+  if (!PEOPLE[w].active) return `<span class="note">你的账号已停用，只能查看。</span>`;
+  if (t.status === "cancelled") return `<span class="note">任务已取消。</span>`;
+  if (t.cancelWait) return t.assignee === w || (!PEOPLE[t.assignee].active && isPAdmin(w, t.project)) ? `<button class="btn primary" data-act="stop-confirm">确认已停止</button><span class="note">任务正在取消，确认工作已停止后才会归档。</span>` : `<span class="note">任务正在取消，等 ${esc(t.assignee)} 确认已停止。</span>`;
+  if (t.pauseWait && t.assignee === w) out.push(`<button class="btn primary" data-act="stop-confirm">确认已停止</button>`);
+  if (t.resumeNeeded && t.assignee === w) out.push(`<button class="btn primary" data-act="continue">继续执行</button>`);
+  if (t.paused) out.push(`<span class="note">任务已暂停${isPAdmin(w, t.project) ? "，可以在下方「管理」里恢复" : "，暂时不能领取或提交"}。</span>`);
+  if (t.status === "draft") out.push(isPAdmin(w, t.project) ? `<button class="btn primary" data-act="open">开放领取</button>` : `<span class="note">草稿由项目管理员开放后才能领取。</span>`);
+  if (t.status === "open") { const [ok, why] = canClaim(t, w); out.push(`<button class="btn primary" data-act="claim" ${ok ? "" : "disabled"}>领取</button>`); if (why) out.push(`<span class="note">${esc(why)}</span>`); }
+  if ((t.status === "doing" || t.status === "rework") && t.assignee === w && !t.paused && !t.resumeNeeded) {
+    if (form === "deliver") out.push(`<div class="actform"><label for="up">选择交付文件（原型里只记录文件名）</label><input id="up" type="file" multiple><textarea id="note" placeholder="交付说明，可选"></textarea><label><input type="checkbox" id="stopDecl"> 本次执行已结束，相关占用已释放</label><div><button class="btn primary" data-act="deliver-go">提交修订 ${t.revs.length + 1}</button> <button class="btn" data-act="cancel">取消</button></div></div>`);
+    else if (form === "release") out.push(`<div class="actform"><textarea id="note" placeholder="交接说明：已完成哪些、还剩什么、有没有已经产生的外部影响"></textarea><div><button class="btn primary" data-act="release-go">放回任务池</button> <button class="btn" data-act="cancel">取消</button></div></div>`);
+    else { out.push(`<button class="btn primary" data-act="deliver">${t.status === "rework" ? "重新交付" : "上传交付"}</button>`); if (t.status === "doing") out.push(`<button class="btn" data-act="release">放回任务池</button>`); }
+  } else if ((t.status === "doing" || t.status === "rework") && t.assignee !== w) {
+    if (!PEOPLE[t.assignee].active && isPAdmin(w, t.project)) out.push(`<button class="btn" data-act="reclaim">收回到任务池</button><span class="note">${esc(t.assignee)} 的账号已停用。收回后其他贡献者可以接手，已有修订和动态都会保留。</span>`);
+    else out.push(`<span class="note">${esc(t.assignee)} ${PEOPLE[t.assignee].active ? "正在处理。" : "的账号已停用，等项目管理员收回。"}</span>`);
+  }
+  if (t.status === "review") {
+    if (t.receiver === w && t.assignee !== w) {
+      if (form === "reject") out.push(`<div class="actform"><span class="small">勾选修订 ${t.revs.length} 未通过的判据</span>${t.criteria.map((c, i) => `<label><input type="checkbox" id="rc${i}"> ${esc(c)}</label>`).join("")}<textarea id="note" placeholder="需要怎样修改"></textarea><div><button class="btn danger" data-act="reject-go">确认退回</button> <button class="btn" data-act="cancel">取消</button></div></div>`);
+      else if (form === "accept") out.push(`<div class="actform"><span class="small">逐条核对修订 ${t.revs.length}，全部勾选后才能通过</span>${t.criteria.map((c, i) => `<label><input type="checkbox" id="ac${i}"> ${esc(c)}</label>`).join("")}<textarea id="note" placeholder="验收意见，可选"></textarea><div><button class="btn primary" data-act="accept-go">确认通过</button> <button class="btn" data-act="cancel">取消</button></div></div>`);
+      else out.push(`<button class="btn primary" data-act="accept">验收通过</button><button class="btn danger" data-act="reject">退回修改</button><span class="note">通过后直接归档。执行人已在交付时声明执行结束。</span>`);
+    } else out.push(`<span class="note">等待 ${esc(t.receiver)} 验收修订 ${t.revs.length}。</span>`);
+  }
+  if (t.status === "done") out.push(`<span class="note">已完成并归档。</span>`);
+  return out.join("");
+}
+function manageFor(t) {
+  const w = me();
+  if (!isPAdmin(w, t.project) || !PEOPLE[w].active || t.status === "cancelled" || t.cancelWait) return "";
+  const f = st.form;
+  const others = T.filter(x => x.id !== t.id && live(x));
+  let form = "";
+  if (f === "edit") form = `<div class="actform"><input type="text" id="eTitle" value="${esc(t.title)}" aria-label="标题"><textarea id="eBrief" aria-label="说明">${esc(t.brief)}</textarea><textarea id="eCrit" aria-label="完成判据">${esc(t.criteria.join("\n"))}</textarea><span class="small">任务内容登记后冻结。这里会取消原任务，并按修改后的内容新建一份草稿。</span><div><button class="btn primary" data-act="edit-go">取消原任务并新建草稿</button> <button class="btn" data-act="cancel">取消</button></div></div>`;
+  if (f === "cancelTask") form = `<div class="actform"><textarea id="note" placeholder="取消原因"></textarea>${t.assignee ? `<span class="small">${esc(t.assignee)} 会收到停止工作的通知。</span>` : ""}<div><button class="btn danger" data-act="cancel-go">确认取消任务</button> <button class="btn" data-act="cancel">返回</button></div></div>`;
+  if (f === "pause") form = `<div class="actform"><input type="text" id="note" placeholder="暂停原因，例如：等设备到位"><div><button class="btn primary" data-act="pause-go">确认暂停</button> <button class="btn" data-act="cancel">返回</button></div></div>`;
+  if (f === "relate") form = `<div class="actform"><div class="addrow"><select id="rType" aria-label="关系">${["相关", "前置任务", "重复于"].map(x => `<option>${x}</option>`).join("")}</select><select id="rTask" aria-label="任务">${others.map(x => `<option value="${x.id}">${x.id} ${esc(x.title)}</option>`).join("")}</select></div><span class="small">选「重复于」会同时取消本任务，并在对方任务上留下记录。</span><div><button class="btn primary" data-act="relate-go">添加</button> <button class="btn" data-act="cancel">返回</button></div></div>`;
+  if (f === "split") form = `<div class="actform"><textarea id="note" placeholder="每行一个子任务标题"></textarea><span class="small">子任务存为草稿，继承项目、验收人和能力要求。</span><div><button class="btn primary" data-act="split-go">拆分</button> <button class="btn" data-act="cancel">返回</button></div></div>`;
+  return `<div><h3>管理</h3><div class="manage">
+    ${["draft", "open"].includes(t.status) ? `<button class="btn sm" data-act="edit">取消并重建</button>` : ""}
+    ${t.status !== "done" ? (t.paused ? `<button class="btn sm" data-act="resume">恢复</button>` : `<button class="btn sm" data-act="pause">暂停</button>`) : ""}
+    <button class="btn sm" data-act="relate">添加关联</button>
+    ${["draft", "open"].includes(t.status) ? `<button class="btn sm" data-act="split">拆分</button>` : ""}
+    ${t.status !== "done" ? `<button class="btn sm danger" data-act="cancelTask">取消任务</button>` : ""}
+    <span>仅项目管理员可见</span></div>${form}</div>`;
+}
+function renderPanel() {
+  const t = task(st.open);
+  if (!t) { $("#layer").innerHTML = ""; return; }
+  const kids = T.filter(x => (x.rel || []).some(r => r.type === "拆分自" && r.id === t.id));
+  const back = T.filter(x => x.id !== t.id && (x.rel || []).some(r => r.id === t.id && r.type !== "拆分自"));
+  const rels = [...t.deps.map(d => ["前置任务", d]), ...t.rel.map(r => [r.type, r.id]), ...kids.map(k => ["子任务", k.id]), ...back.map(b => [b.rel.find(r => r.id === t.id).type === "重复于" ? "被标为重复" : "被关联", b.id])];
+  $("#layer").innerHTML = `<div class="scrim" data-close></div>
+  <aside class="panel" role="dialog" aria-label="${t.id} 任务详情">
+    <header><span class="mono">${t.id}</span>${pill(t.status)}${t.paused ? `<span class="flag warn">已暂停</span>` : ""}${t.flag ? `<span class="flag warn">${esc(t.flag)}</span>` : ""}<button class="x" data-close aria-label="关闭">×</button></header>
+    <div class="pbody">
+      <div class="pmain">
+        <h2>${esc(t.title)}</h2>
+        <div class="actions">${actionsFor(t)}</div>
+        ${t.handoff && t.status !== "done" ? `<div class="callout"><b>上一位执行人 ${esc(t.handoff.by)} 的交接说明</b><span>${esc(t.handoff.note || "未填写")}</span><span class="small">${t.handoff.at}</span></div>` : ""}
+        <div><h3>说明</h3><p class="brief">${esc(t.brief)}</p></div>
+        <div><h3>完成判据</h3><ul class="crit">${t.criteria.map(c => `<li class="${t.status === "done" ? "ok" : ""}">${esc(c)}</li>`).join("")}</ul></div>
+        ${t.inputs.length ? `<div><h3>输入资料</h3><div class="files">${t.inputs.map(f => `<div class="file">📎 ${esc(f)} <button class="btn sm" data-dl>下载</button></div>`).join("")}</div></div>` : ""}
+        ${t.revs.length ? `<div><h3>交付修订</h3><div class="files">${t.revs.slice().reverse().map((r, i) => `<div class="rev ${i ? "" : "cur"}"><div class="file"><b>修订 ${r.n}</b><span class="small">${esc(r.by)} · ${r.at}${i ? "" : " · 当前"}</span></div>${r.files.map(f => `<div class="file">📄 ${esc(f)} <span class="mono small">${hex(t.id + r.n + f).slice(0, 8)}…</span><button class="btn sm" data-dl>下载</button></div>`).join("")}</div>`).join("")}</div></div>` : ""}
+        ${rels.length ? `<div><h3>关联任务</h3><div class="rels">${rels.map(([k, id]) => `<div><span class="small">${k}</span> ${id.startsWith("F") ? `<button class="link mono" data-gofb="${id}">${id}</button>` : `<button class="link mono" data-open="${id}">${id}</button> ${task(id) ? `${esc(task(id).title)} ${pill(task(id).status)}` : ""}`}</div>`).join("")}</div></div>` : ""}
+        ${manageFor(t)}
+        <div><h3>动态</h3><ul class="timeline">${t.log.map(l => `<li><b>${esc(l[0])}</b> ${esc(l[1])} <div class="when">${l[2]}</div></li>`).join("")}</ul></div>
+        ${canWrite(me(), t.project) ? `<div class="comment"><input id="cm" placeholder="写评论，回车发送" aria-label="评论"><button class="btn" data-act="comment">发送</button></div>` : `<p class="small">你在这个项目是观察者，只能查看。</p>`}
+        <details class="tech"><summary>技术细节</summary><dl>
+          <dt>领取编号</dt><dd class="mono">${t.assignee ? "C-" + hex(t.id).slice(0, 10) : "—"}</dd>
+          <dt>任务版本</dt><dd class="mono">${t.log.length}</dd>
+          <dt>输入指纹</dt><dd class="mono">${hex(t.id + "in")}${hex(t.id + "x")}</dd>
+          <dt>领取方式</dt><dd>${t.mode}${t.target.length ? "：" + esc(t.target.join("、")) : ""}</dd></dl></details>
+      </div>
+      <div class="side">
+        <div class="field"><span>状态</span>${pill(t.status)}</div>
+        <div class="field"><span>项目</span><button class="link" data-pvgo="${t.project}">${esc(pname(t.project))}</button></div>
+        <div class="field"><span>负责人</span>${avatar(t.owner)}</div>
+        <div class="field"><span>执行人</span>${avatar(t.assignee)}</div>
+        <div class="field"><span>验收人</span>${avatar(t.receiver)}</div>
+        <div class="field"><span>关注者</span><div class="avs">${t.watchers.map(x => avatar(x, false)).join("") || `<span class="small">无</span>`}</div>
+          ${canWrite(me(), t.project) ? `<button class="btn sm" data-act="watch">${t.watchers.includes(me()) ? "取消关注" : "关注"}</button>` : ""}</div>
+        <div class="field"><span>谁可以领</span>${{ 公开: "项目内的贡献者", 优先: "优先通知 ", 限定: "只给 " }[t.mode]}${esc(targetText(t))}</div>
+        <div class="field"><span>能力要求</span><div class="tags">${t.req.map(reqTag).join("") || `<span class="small">不限</span>`}</div></div>
+      </div>
+    </div>
+  </aside>`;
+}
+
+/* ---- new task ---- */
+function renderNew(keep) {
+  const w = me();
+  if (!PEOPLE[w].active) { toast("你的账号已停用"); return; }
+  const choices = PROJ.filter(p => PEOPLE[w].sys || canDo(w, p.id));
+  if (!choices.length) { toast("报告者和观察者不能直接新建任务；报告者可以在「反馈与改进」提需求，由项目管理员转为任务"); return; }
+  const pid = keep?.pid || (st.proj !== "全部" && choices.find(p => p.id === st.proj) ? st.proj : choices[0].id);
+  const p = pj(pid);
+  const receivers = isPAdmin(w, pid) ? doers(pid) : [w];
+  const execs = doers(pid);
+  const owners = Object.keys(p.members).filter(n => p.members[n].role !== "观察者" && PEOPLE[n].kind === "人员" && PEOPLE[n].active);
+  const admin = isPAdmin(w, pid);
+  const k = keep || {};
+  $("#layer").innerHTML = `<div class="scrim" data-close></div>
+  <form class="modal form" id="newForm" aria-label="新建任务">
+    <h2>新建任务</h2>
+    <label class="f"><span>项目</span><select id="nProj" ${st.fb ? "disabled" : ""}>${choices.map(x => `<option value="${x.id}" ${x.id === pid ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select></label>
+    <label class="f"><span>标题 <em>*</em></span><input type="text" id="nTitle" required placeholder="例如：整理服务器部署检查清单" value="${esc(k.title || "")}"></label>
+    <label class="f"><span>说明 <em>*</em></span><textarea id="nBrief" required placeholder="要做什么、范围到哪里、输入资料在哪">${esc(k.brief || "")}</textarea></label>
+    <label class="f"><span>完成判据 <em>*</em> <span class="small">每行一条</span></span><textarea id="nCrit" required placeholder="覆盖端口、证书、备份、账号四类">${esc(k.crit || "")}</textarea></label>
+    <div class="two">
+      <label class="f"><span>负责人 <em>*</em> <span class="small">跟进结果</span></span><select id="nOwner">${owners.map(n => `<option ${n === (owners.includes(w) ? w : p.owner) ? "selected" : ""}>${n}</option>`).join("")}</select></label>
+      <label class="f"><span>验收人 <em>*</em> <span class="small">${isPAdmin(w, pid) ? `默认 ${esc(p.receiver || "未设置")}` : "你登记的任务由你验收"}</span></span><select id="nRecv" required>${receivers.map(n => `<option ${n === p.receiver ? "selected" : ""}>${n}</option>`).join("") || `<option value="">该项目还没有贡献者</option>`}</select></label>
+    </div>
+    <details><summary>更多选项：输入资料、能力、领取方式、前置任务</summary>
+      <label class="f"><span>输入资料</span><input type="file" id="nFiles" multiple></label>
+      <div class="f"><span>需要的能力</span><span class="small">点一次为「需要」，再点为「需核实」，第三次取消。标签在项目设置里维护。</span><div class="chips">${p.tags.map(x => `<button type="button" class="chip" data-tag="${esc(x)}" data-lv="0">${esc(x)}</button>`).join("")}</div></div>
+      <div class="f"><span>谁可以领</span><div class="radios">${["公开", "优先", "限定"].map((m, i) => `<label><input type="radio" name="mode" value="${m}" ${i ? "" : "checked"}> ${{ 公开: "项目内的贡献者", 优先: "优先通知", 限定: "只给" }[m]}</label>`).join("")}</div>
+        <select id="nTarget" aria-label="指定对象"><optgroup label="成员">${execs.map(n => `<option value="${n}">${n}</option>`).join("")}</optgroup><optgroup label="分工">${p.labels.map(l => `<option value="#${esc(l)}">分工「${esc(l)}」</option>`).join("")}</optgroup></select></div>
+      <label class="f"><span>前置任务</span><select id="nDep"><option value="">无</option>${T.filter(t => t.project === pid && !["done", "cancelled"].includes(t.status)).map(t => `<option value="${t.id}">${t.id} ${esc(t.title)}</option>`).join("")}</select></label>
+    </details>
+    <footer><label><input type="checkbox" id="nOpen" ${admin && p.autoOpen ? "checked" : ""} ${admin ? "" : "disabled"}> 创建后立即开放领取${admin ? "" : "（需项目管理员）"}</label><button type="button" class="btn" data-close>取消</button><button class="btn primary">创建</button></footer>
+  </form>`;
+  (keep ? $("#nProj") : $("#nTitle")).focus();
+}
+
+function renderBell() {
+  const list = NOTIFS.filter(n => n.to === me());
+  $("#layer").innerHTML = `<div class="scrim" data-close style="background:transparent"></div><div class="pop" role="dialog" aria-label="通知">
+    <div class="addrow"><b>通知</b><span class="small">${list.filter(n => !n.read).length} 条未读</span></div>
+    ${list.map((n, i) => `<button class="item ${n.read ? "" : "unread"}" data-notif="${NOTIFS.indexOf(n)}"><span>${esc(n.text)}</span><span class="small">${n.at}</span></button>`).join("") || `<p class="small">暂无通知。</p>`}
+    <p class="small">站内通知。AI 窗口通过接口查询同一份通知；能否主动唤醒，按各平台实际接口接入。</p></div>`;
+}
+
+function render() {
+  document.querySelectorAll("[data-nav]").forEach(b => b.setAttribute("aria-current", b.dataset.nav === st.view ? "page" : "false"));
+  $("#viewTitle").textContent = { mine: "我的工作", board: "看板", list: "列表", projects: "项目", feedback: "反馈与改进", windows: "AI 窗口", activity: "动态", accounts: "账号与权限", notes: "设计说明" }[st.view];
+  const showSeg = ["mine", "board", "list"].includes(st.view);
+  $("#projSeg").hidden = !showSeg; $("#searchWrap").hidden = !showSeg; $("#spacer").hidden = showSeg;
+  $("#projSeg").innerHTML = [["全部", "全部"], ...PROJ.map(p => [p.id, p.name])].map(([id, n]) => `<button data-proj="${id}" aria-pressed="${st.proj === id}">${esc(n)}</button>`).join("");
+  $("#who").innerHTML = Object.entries(PEOPLE).map(([k, p]) => `<option value="${k}" ${k === st.who ? "selected" : ""}>${k}（${p.kind}${p.sys ? " · 系统管理员" : ""}${p.active ? "" : " · 已停用"}）</option>`).join("");
+  const n = todo(me()).length + fbTodo(me()).length; $("#mineCount").textContent = n || ""; $("#mineCount").hidden = !n;
+  const fb = FB.filter(f => f.status === "待评估" && isPAdmin(me(), f.project)).length; $("#fbCount").textContent = fb || ""; $("#fbCount").hidden = !fb;
+  const un = NOTIFS.filter(x => x.to === me() && !x.read).length; $("#bellCount").textContent = un || ""; $("#bellCount").hidden = !un;
+  renderToolbar();
+  $("#view").innerHTML = { mine: renderMine, board: renderBoard, list: renderList, projects: renderProjects, feedback: renderFeedback, windows: renderWindows, activity: renderActivity, accounts: renderAccounts, notes: renderNotes }[st.view]();
+  if (st.open) renderPanel();
+}
+
+/* ================= events ================= */
+$("#who").addEventListener("change", e => { st.who = e.target.value; st.form = null; st.secret = null; st.lastInvite = null; save(); closeLayer(); render(); });
+$("#q").addEventListener("input", e => { st.q = e.target.value; render(); });
+$("#newBtn").addEventListener("click", () => { st.open = null; renderNew(); });
+$("#bell").addEventListener("click", () => { st.open = null; renderBell(); });
+
+const closeLayer = () => { st.open = null; st.form = null; st.fb = null; $("#layer").innerHTML = ""; };
+const go = (view, extra = {}) => { closeLayer(); Object.assign(st, { view }, extra); save(); render(); };
+document.addEventListener("click", e => {
+  const el = e.target.closest("[data-nav],[data-proj],[data-chip],[data-sort],[data-open],[data-close],[data-act],[data-tag],[data-pv],[data-ptab],[data-goboard],[data-golist],[data-pvgo],[data-mrm],[data-madd],[data-tagrm],[data-capadd],[data-caprm],[data-capver],[data-newproj],[data-atab],[data-reset],[data-rotate],[data-toggle],[data-sysadm],[data-redeem],[data-revoke],[data-copy],[data-secretx],[data-notif],[data-gofb],[data-fbtask],[data-fbno],[data-fbres],[data-report],[data-export],[data-dl],[data-mlabel],[data-lblrm],[data-capgo]");
+  if (!el) return;
+  const d = el.dataset;
+  if (d.nav) go(d.nav, d.nav === "projects" ? { pv: null } : {});
+  else if (d.proj) { st.proj = d.proj; render(); }
+  else if (d.chip) { st.chip = d.chip; render(); }
+  else if (d.sort) { st.sort = d.sort; render(); }
+  else if (d.tag !== undefined) { const lv = (+d.lv + 1) % 3; d.lv = lv; el.classList.toggle("on", lv === 1); el.classList.toggle("strong", lv === 2); el.textContent = d.tag + ["", " · 需要", " · 需核实"][lv]; }
+  else if (d.open) { st.open = d.open; st.form = null; renderPanel(); }
+  else if ("close" in d) closeLayer();
+  else if (d.act) act(d.act);
+  else if (d.pv !== undefined) { st.pv = d.pv || null; st.ptab = "概览"; render(); }
+  else if (d.pvgo) go("projects", { pv: d.pvgo, ptab: "概览" });
+  else if (d.ptab) { st.ptab = d.ptab; render(); }
+  else if (d.goboard || d.golist) go(d.goboard ? "board" : "list", { proj: d.goboard || d.golist });
+  else if (d.mrm) { const p = pj(st.pv); const busy = T.find(t => t.project === p.id && t.assignee === d.mrm && ["doing", "rework", "review"].includes(t.status)); if (busy) { toast(`${d.mrm} 还有未完成的 ${busy.id}，先放回或完成后再移出`); return; } delete p.members[d.mrm]; toast(`已将 ${d.mrm} 移出项目`); render(); }
+  else if ("madd" in d) { const p = pj(st.pv); const n = $("#addWho").value; let role = $("#addRole").value; if (PEOPLE[n].kind === "AI" && role === "项目管理员") { toast("AI 窗口最高只能是贡献者"); return; } p.members[n] = { role, duty: "", labels: [] }; toast(`已添加 ${n}，角色 ${role}`); render(); }
+  else if (d.tagrm) { const p = pj(st.pv); p.tags = p.tags.filter(x => x !== d.tagrm); render(); }
+  else if (d.lblrm) { const p = pj(st.pv); p.labels = p.labels.filter(x => x !== d.lblrm); Object.values(p.members).forEach(m => m.labels = (m.labels || []).filter(x => x !== d.lblrm)); render(); }
+  else if (d.mlabel) { const [n, l] = d.mlabel.split("|"); const m = pj(st.pv).members[n]; m.labels = m.labels || []; const i = m.labels.indexOf(l); if (i < 0) m.labels.push(l); else m.labels.splice(i, 1); el.setAttribute("aria-pressed", i < 0); }
+  else if (d.capadd) { const tag = $("#capTag").value; const basis = $("#capBasis").value.trim() || "自报"; CAPS[d.capadd].push({ tag, status: "已申报", basis, expires: "2027-11-09" }); toast(`已申报「${tag}」`); render(); }
+  else if (d.caprm) { const [id, tag] = d.caprm.split("|"); CAPS[id] = CAPS[id].filter(c => c.tag !== tag); render(); }
+  else if (d.capver) { st.capv = d.capver; render(); }
+  else if (d.capgo) { const ev = $("#capEv").value.trim(); if (!ev) { toast("请填写核实证据"); return; } const [id, tag] = d.capgo.split("|"); const c = capOf(id, tag); c.status = "已核实"; c.basis = `${me()} 于 ${now()} 核实：${ev}`; st.capv = null; notify(id, `你的能力「${tag}」已被 ${me()} 核实`); toast(`「${tag}」已标记为已核实`); render(); }
+  else if ("newproj" in d) { const id = "P" + (PROJ.length + 1); PROJ.push({ id, name: "新项目 " + (PROJ.length + 1), desc: "", owner: me(), receiver: "", autoOpen: true, wip: 3, tags: ["Markdown 写作"], labels: [], members: { [me()]: { role: "项目管理员", duty: "", labels: [] } } }); st.pv = id; st.ptab = "设置"; toast("已创建项目，先填写名称并添加成员"); render(); }
+  else if (d.atab) { st.atab = d.atab; render(); }
+  else if (d.reset) { st.secret = { title: `${d.reset} 的一次性重置码`, value: `RST-${rand(4)}-${rand(4)}`, note: "24 小时内有效。对方在登录页点「重置密码」，输入账号和这个重置码后设置新密码。关闭后不再显示。" }; render(); }
+  else if (d.rotate) { st.secret = { title: `${d.rotate} 的新令牌`, value: `tp_${rand(8).toLowerCase()}${rand(8).toLowerCase()}${rand(8).toLowerCase()}`, note: "旧令牌已失效。请交给该窗口替换保存的凭据；关闭后不再显示。" }; SEEN[d.rotate] = now(); render(); }
+  else if (d.toggle) { const p = PEOPLE[d.toggle]; p.active = !p.active; if (!p.active) T.filter(t => t.assignee === d.toggle && ["doing", "rework"].includes(t.status)).forEach(t => { t.log.push([me(), `停用账号 ${d.toggle}，任务待收回`, now()]); admins(t.project).forEach(a => notify(a, `${d.toggle} 已停用，${t.id} 需要收回`, t.id)); }); toast(`${d.toggle} 已${p.active ? "启用" : "停用"}`); render(); }
+  else if (d.sysadm) { PEOPLE[d.sysadm].sys = !PEOPLE[d.sysadm].sys; toast(`${d.sysadm} ${PEOPLE[d.sysadm].sys ? "已设为" : "已取消"}系统管理员`); render(); }
+  else if (d.redeem) redeem(d.redeem);
+  else if (d.revoke) { INVITES.find(i => i.code === d.revoke).revoked = true; toast("邀请已撤销"); render(); }
+  else if (d.copy) copy($("#" + d.copy).textContent);
+  else if ("secretx" in d) { st.secret = null; render(); }
+  else if (d.notif) { const n = NOTIFS[+d.notif]; n.read = true; if (n.task) { st.open = n.task; st.form = null; render(); } else { closeLayer(); go("feedback"); } }
+  else if (d.gofb) go("feedback");
+  else if (d.fbtask) fbToTask(d.fbtask);
+  else if (d.fbno) { FB.find(f => f.id === d.fbno).status = "不采纳"; toast("已标记不采纳，记录保留"); render(); }
+  else if (d.fbres) { const f = FB.find(x => x.id === d.fbres); const v = $("#fbr-" + f.id).value.trim(); if (!v) { toast("请写下实际改善了什么"); return; } f.result = v; toast(`${f.id} 已复核`); render(); }
+  else if (d.report) { const p = PEOPLE[d.report]; p.report = { s: $("#repS").value, note: $("#repN").value.trim() || p.report.note, at: now() }; SEEN[d.report] = now(); toast("已回报执行状态"); render(); }
+  else if ("export" in d) exportBoard();
+  else if ("dl" in d) toast("原型里不提供下载；正式版直接下载并校验指纹");
+});
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && $("#layer").innerHTML) closeLayer();
+  if (e.key === "Enter" && e.target.id === "cm") act("comment");
+  if (e.key === "Enter" && e.target.id === "tagNew") { e.preventDefault(); const v = e.target.value.trim(); const p = pj(st.pv); if (v && !p.tags.includes(v)) p.tags.push(v); render(); $("#tagNew")?.focus(); }
+  if (e.key === "Enter" && e.target.id === "lblNew") { e.preventDefault(); const v = e.target.value.trim(); const p = pj(st.pv); if (v && !p.labels.includes(v)) p.labels.push(v); render(); $("#lblNew")?.focus(); }
+});
+document.addEventListener("change", e => {
+  const d = e.target.dataset;
+  if (e.target.id === "lane") { st.lane = e.target.value; save(); render(); }
+  else if (e.target.id === "actWho") { st.actWho = e.target.value; render(); }
+  else if (e.target.name === "ikind") { st.ikind = e.target.value; render(); }
+  else if (e.target.id === "nProj") renderNew({ pid: e.target.value, title: $("#nTitle").value, brief: $("#nBrief").value, crit: $("#nCrit").value });
+  else if (d.mrole) { const p = pj(st.pv); if (d.mrole === p.owner && e.target.value !== "项目管理员") { toast("负责人需保持管理员角色，先在设置里更换负责人"); render(); return; } p.members[d.mrole].role = e.target.value; toast(`${d.mrole} 改为${e.target.value}`); render(); }
+  else if (d.mduty) { pj(st.pv).members[d.mduty].duty = e.target.value.trim(); toast("职责已保存"); }
+  else if (d.auto) { PEOPLE[d.auto].auto = e.target.value; toast(`${d.auto}：${e.target.value}`); }
+  else if (d.fbdup) { if (!e.target.value) return; const f = FB.find(x => x.id === d.fbdup); f.status = "重复"; f.dup = e.target.value; toast(`${f.id} 标记为重复于 ${f.dup}`); render(); }
+});
+
+function act(a) {
+  const t = task(st.open); if (!t) return;
+  const note = () => ($("#note") || {}).value?.trim() || "";
+  const forms = ["deliver", "release", "reject", "accept", "edit", "cancelTask", "pause", "relate", "split"];
+  if (forms.includes(a)) { st.form = a; renderPanel(); return; }
+  if (a === "cancel") { st.form = null; renderPanel(); return; }
+  if (a === "open") move(t, "open", me());
+  else if (a === "claim") move(t, "doing", me());
+  else if (a === "deliver-go") {
+    const files = [...($("#up").files || [])].map(f => f.name);
+    if (!files.length) { toast("请先选择要交付的文件"); return; }
+    if (!$("#stopDecl").checked) { toast("请先确认本次执行已结束"); return; }
+    st.form = null; move(t, "review", me(), { files, note: "执行人声明本次执行已结束" + (note() ? "，" + note() : "") });
+  }
+  else if (a === "release-go") { if (!note()) { toast("请写交接说明，方便下一位接手"); return; } st.form = null; move(t, "open", me(), { note: note() }); }
+  else if (a === "accept-go") {
+    if (t.criteria.some((c, i) => !$("#ac" + i).checked)) { toast("还有判据没有勾选"); return; }
+    st.form = null; move(t, "done", me(), { note: `逐项核对 ${t.criteria.length} 条判据${note() ? "，" + note() : ""}` });
+  }
+  else if (a === "reject-go") {
+    const bad = t.criteria.filter((c, i) => $("#rc" + i)?.checked);
+    if (!bad.length) { toast("请勾选至少一条未通过的判据"); return; }
+    st.form = null; move(t, "rework", me(), { note: `未通过「${bad.join("」「")}」${note() ? "，" + note() : ""}` });
+  }
+  else if (a === "reclaim") move(t, "open", me(), { note: `${t.assignee} 的账号已停用，由项目管理员收回` });
+  else if (a === "edit-go") {
+    const criteria = $("#eCrit").value.split("\n").map(s => s.trim()).filter(Boolean);
+    if (!$("#eTitle").value.trim() || !$("#eBrief").value.trim() || !criteria.length) { toast("标题、说明和判据都不能为空"); return; }
+    const id = "T" + String(++seq).padStart(2, "0");
+    T.unshift({ ...structuredClone(t), id, title: $("#eTitle").value.trim(), brief: $("#eBrief").value.trim(), criteria, status: "draft", assignee: null, revs: [], handoff: null, paused: false, rel: [...t.rel, { type: "重建自", id: t.id }], log: [[me(), `从 ${t.id} 重建`, now()]] });
+    t.log.push([me(), `取消并重建为 ${id}`, now()]); t.status = "cancelled"; st.form = null; st.open = id; toast(`已取消 ${t.id}，新草稿 ${id}`); render();
+  }
+  else if (a === "cancel-go") {
+    if (!note()) { toast("请写取消原因"); return; }
+    t.paused = false; t.pauseWait = false; t.resumeNeeded = false; st.form = null;
+    if (t.status === "doing" && t.assignee) { t.cancelWait = true; t.log.push([me(), "请求取消：" + note(), now()]); notify(t.assignee, `${t.id} 请求取消，请停止工作并确认：${note()}`, t.id); toast(`${t.id} 取消中，等执行人确认停止`); }
+    else { t.log.push([me(), "取消：" + note(), now()]); t.status = "cancelled"; if (t.assignee) notify(t.assignee, `${t.id} 已取消：${note()}`, t.id); toast(`${t.id} 已取消`); }
+    render();
+  }
+  else if (a === "pause-go") { t.paused = true; t.log.push([me(), "暂停" + (note() ? "：" + note() : ""), now()]); if (t.status === "doing" && t.assignee) { t.pauseWait = true; notify(t.assignee, `${t.id} 已暂停，请停止工作并确认`, t.id); } st.form = null; render(); }
+  else if (a === "resume") { if (t.pauseWait) { toast("等执行人确认停止后才能恢复"); return; } t.paused = false; if (t.status === "doing" && t.assignee) t.resumeNeeded = true; t.log.push([me(), "恢复", now()]); if (t.assignee) notify(t.assignee, `${t.id} 已恢复，可以继续`, t.id); render(); }
+  else if (a === "stop-confirm") { if (t.cancelWait) { t.cancelWait = false; t.status = "cancelled"; t.log.push([me(), "确认已停止，任务取消", now()]); toast(`${t.id} 已取消`); } else { t.pauseWait = false; t.log.push([me(), "确认已停止", now()]); toast("已确认停止"); } admins(t.project).forEach(x => x !== me() && notify(x, `${t.id} 的执行已确认停止`, t.id)); render(); }
+  else if (a === "continue") { t.resumeNeeded = false; t.log.push([me(), "继续执行", now()]); render(); }
+  else if (a === "relate-go") {
+    const type = $("#rType").value, id = $("#rTask").value;
+    if (type === "前置任务") { if (task(id).deps.includes(t.id)) { toast(`${id} 已依赖本任务，不能形成循环`); return; } t.deps.push(id); }
+    else t.rel.push({ type, id });
+    t.log.push([me(), `添加关联：${type} ${id}`, now()]); task(id).log.push([me(), `${t.id} 标记与本任务「${type}」`, now()]);
+    if (type === "重复于") { t.status = "cancelled"; if (t.assignee) notify(t.assignee, `${t.id} 与 ${id} 重复，已取消`, t.id); }
+    st.form = null; render();
+  }
+  else if (a === "split-go") {
+    const titles = note().split("\n").map(s => s.trim()).filter(Boolean);
+    if (!titles.length) { toast("每行写一个子任务标题"); return; }
+    titles.forEach(title => { const id = "T" + String(++seq).padStart(2, "0"); T.unshift({ ...structuredClone(t), id, title, status: "draft", assignee: null, revs: [], rel: [{ type: "拆分自", id: t.id }], handoff: null, paused: false, log: [[me(), `从 ${t.id} 拆分`, now()]] }); });
+    t.log.push([me(), `拆分出 ${titles.length} 个子任务`, now()]); st.form = null; toast(`已拆分出 ${titles.length} 个草稿`); render();
+  }
+  else if (a === "watch") { const i = t.watchers.indexOf(me()); if (i < 0) t.watchers.push(me()); else t.watchers.splice(i, 1); toast(i < 0 ? `已关注 ${t.id}` : `已取消关注 ${t.id}`); renderPanel(); }
+  else if (a === "comment") { const v = $("#cm").value.trim(); if (!v) return; t.log.push([me(), "评论：" + v, now()]); [...new Set([t.assignee, t.receiver, ...followers(t)])].filter(x => x && x !== me()).forEach(x => notify(x, `${me()} 在 ${t.id} 评论：${v}`, t.id)); renderPanel(); }
+}
+
+function fbToTask(fid) {
+  const f = FB.find(x => x.id === fid);
+  st.open = null; st.form = null; st.fb = f.id;
+  renderNew({ pid: f.project, title: f.title, brief: `${f.detail}\n（来自反馈 ${f.id}）`, crit: "" });
+  toast("补全完成判据后创建任务");
+}
+function redeem(code) {
+  const i = INVITES.find(x => x.code === code);
+  let name;
+  if (i.kind === "AI") { const pre = PREFIX[i.platform]; const n = Object.keys(PEOPLE).filter(k => k.startsWith(pre)).length + 1; name = `${pre}-${String(n).padStart(4, "0")}`; PEOPLE[name] = { kind: "AI", color: "#6b7fa8", platform: i.platform, owner: i.owner, online: true, where: "新登记窗口", auto: "仅通知", active: true, report: { s: "空闲", note: "刚完成登记", at: now() } }; }
+  else { name = `member-${Object.keys(PEOPLE).length + 1}`; PEOPLE[name] = { kind: "人员", color: "#5b8a7a", active: true }; }
+  CAPS[name] = []; SEEN[name] = now(); pj(i.project).members[name] = { role: i.role, duty: "", labels: [] }; i.used = name;
+  notify(i.by, `邀请 ${i.code} 已被使用，新账号 ${name}`);
+  toast(`模拟注册完成：${name} 加入 ${pname(i.project)}，可以在左下角切换到这个身份`); render();
+}
+function exportBoard() {
+  const md = PROJ.map(p => `## ${p.name}\n\n` + STATES.map(s => { const ts = T.filter(t => t.project === p.id && t.status === s.k); return ts.length ? `### ${s.n}\n` + ts.map(t => `- ${t.id} ${t.title}（执行 ${t.assignee || "未领取"}，验收 ${t.receiver}）`).join("\n") : ""; }).filter(Boolean).join("\n\n")).join("\n\n");
+  $("#layer").innerHTML = `<div class="scrim" data-close></div><div class="modal" role="dialog" aria-label="导出看板"><h2>导出看板（Markdown）</h2><div class="codebox" id="mdOut">${esc("# 任务看板 " + now() + "\n\n" + md)}</div><footer><button class="btn" data-close>关闭</button><button class="btn primary" data-copy="mdOut">复制</button></footer></div>`;
+}
+
+document.addEventListener("submit", e => {
+  e.preventDefault();
+  const id = e.target.id;
+  if (id === "projForm") {
+    const p = pj(st.pv);
+    p.name = $("#pName").value.trim() || p.name; p.owner = $("#pOwner").value; p.desc = $("#pDesc").value.trim();
+    p.receiver = $("#pRecv").value; p.wip = Math.max(0, +$("#pWip").value || 0); p.autoOpen = $("#pAuto").checked;
+    toast("项目设置已保存"); render(); return;
+  }
+  if (id === "pwForm") { if (!$("#pw0").value) { toast("请输入当前密码"); return; } toast("密码已修改，其他设备上的会话需要重新登录"); $("#pw0").value = $("#pw1").value = ""; return; }
+  if (id === "invForm") {
+    const ai = st.ikind === "AI"; const d = new Date(Date.now() + 864e5);
+    const inv = { code: `INV-${rand(4)}-${rand(4)}`, kind: st.ikind, platform: ai ? $("#iPlat").value : null, owner: ai ? $("#iOwner").value : null, project: $("#iProj").value, role: $("#iRole").value, by: me(), at: now(), expires: `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`, used: null, revoked: false };
+    INVITES.unshift(inv); st.lastInvite = inv; toast("邀请已生成"); render(); return;
+  }
+  if (id === "fbForm") {
+    const f = { id: "F" + String(++fseq).padStart(2, "0"), kind: document.querySelector('input[name="fbk"]:checked').value, title: $("#fbTitle").value.trim(), detail: $("#fbDetail").value.trim(), by: me(), at: now(), project: $("#fbProj").value, task: $("#fbTask").value || null, status: "待评估", toTask: null, dup: null, result: "" };
+    FB.unshift(f); admins(f.project).forEach(a => a !== me() && notify(a, `新反馈 ${f.id}：${f.title}`)); toast(`${f.id} 已提交，等项目管理员评估`); render(); return;
+  }
+  if (id !== "newForm") return;
+  if (!$("#nRecv").value) { toast("该项目还没有贡献者可以验收，请先在项目成员里添加"); return; }
+  const tid = "T" + String(++seq).padStart(2, "0");
+  const pid = $("#nProj").value;
+  const mode = document.querySelector('input[name="mode"]:checked').value;
+  const dep = $("#nDep").value;
+  const openNow = $("#nOpen").checked && isPAdmin(me(), pid);
+  const req = [...document.querySelectorAll("[data-tag]")].filter(b => +b.dataset.lv > 0).map(b => ({ tag: b.dataset.tag, verify: b.dataset.lv === "2" }));
+  const t = { id: tid, title: $("#nTitle").value.trim(), project: pid, status: "draft", assignee: null, owner: $("#nOwner").value, watchers: [], receiver: $("#nRecv").value,
+    req, mode, target: mode === "公开" ? [] : [$("#nTarget").value], inputs: [...($("#nFiles").files || [])].map(f => f.name), revs: [], rel: [],
+    brief: $("#nBrief").value.trim(), criteria: $("#nCrit").value.split("\n").map(s => s.trim()).filter(Boolean), deps: dep ? [dep] : [],
+    log: [[me(), "创建任务", now()]] };
+  T.unshift(t);
+  if (st.fb) { const f = FB.find(x => x.id === st.fb); f.status = "已纳入"; f.toTask = tid; t.rel.push({ type: "来自反馈", id: f.id }); t.watchers.push(f.by); t.log[0][1] = `由反馈 ${f.id} 转为任务`; notify(f.by, `你的反馈 ${f.id} 已转为任务 ${tid}`, tid); st.fb = null; }
+  $("#layer").innerHTML = "";
+  if (openNow) move(t, "open", me());
+  else { admins(pid).forEach(a => a !== me() && notify(a, `${me()} 新建了草稿 ${tid}，等你开放`, tid)); toast(`${tid} 已保存为草稿，等项目管理员开放`); render(); }
+});
+
+/* drag and drop on the board */
+let dragId = null;
+document.addEventListener("dragstart", e => { const c = e.target.closest("[data-drag]"); if (!c) return; dragId = c.dataset.drag; c.classList.add("dragging"); e.dataTransfer.setData("text/plain", dragId); });
+document.addEventListener("dragend", () => { dragId = null; document.querySelectorAll(".dragging,.drop-ok").forEach(x => x.classList.remove("dragging", "drop-ok")); });
+document.addEventListener("dragover", e => {
+  const col = e.target.closest("[data-col]"); if (!col || !dragId) return;
+  e.preventDefault();
+  document.querySelectorAll(".drop-ok").forEach(x => x !== col && x.classList.remove("drop-ok"));
+  col.classList.add("drop-ok");
+});
+document.addEventListener("drop", e => {
+  const col = e.target.closest("[data-col]"); if (!col || !dragId) return;
+  e.preventDefault();
+  const t = task(dragId); const to = col.dataset.col;
+  if (to === t.status) return;
+  const pre = to === "review" ? "deliver" : to === "rework" && t.status === "review" ? "reject" : to === "done" && t.status === "review" ? "accept" : to === "open" && t.status === "doing" && t.assignee === me() ? "release" : null;
+  if (pre) {
+    const allowed = { deliver: t.assignee === me() && !t.paused, reject: t.receiver === me() && t.assignee !== me(), accept: t.receiver === me() && t.assignee !== me(), release: !t.paused }[pre];
+    if (!allowed) { move(t, to, me()); return; }
+    st.open = t.id; st.form = pre; renderPanel(); toast({ deliver: "选择交付文件后提交", reject: "勾选未通过的判据后退回", accept: "逐条核对判据后通过", release: "写交接说明后放回" }[pre]);
+    return;
+  }
+  move(t, to, me());
+});
+
+render();
+</script>
