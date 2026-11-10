@@ -496,6 +496,9 @@ def _apply(state, p, actor, now, event_id):
         if target and not historical:
             if kind == "started":
                 rules.require(target["state"] in {"start-authorized", "running", "unconfirmed"}, "动作不处于已获许可状态")
+                grant = data["grants"].get(target.get("grant_id"))
+                # A delayed receipt cannot revive a permit whose physical end was confirmed.
+                rules.require(grant and grant.get("physical") != "end-confirmed", "资源已确认安全结束或原授权不存在，不能再次登记实际开始")
                 target["state"] = "running"
             elif kind in TERMINAL:
                 target["state"] = kind
@@ -545,6 +548,9 @@ def _apply(state, p, actor, now, event_id):
         rules.require(actor == target["executor_id"] or human or trusted, "无权归还此动作资源", "intent-final")
         safe = not target.get("permit_id") or basis == "human-isolation" and human or basis == "adapter-confirmed" and trusted
         rules.require(basis in {"unconfirmed", "human-isolation", "adapter-confirmed"}, "归还依据类型无效")
+        # Physical end confirmation is final; repeated releases retain its evidence.
+        if grant.get("physical") == "end-confirmed":
+            return
         grant.update(state="released", physical="end-confirmed" if safe else "unknown", version=grant["version"] + 1,
                      release_evidence=proof, released_by=actor, release_event=event_id)
         for request in data["resource_requests"].values():

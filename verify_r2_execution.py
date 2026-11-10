@@ -136,6 +136,124 @@ class ExecutionTests(unittest.TestCase):
                       basis="human-isolation", evidence={"note": "wrong grant", "sha256": "a"*64})
         self.assertEqual(self.data["grants"][new_grant["id"]], new_grant)
 
+    def started_fact(self, aid):
+        action = self.data["actions"][aid]
+        return self.call("execution-fact", action["executor_id"], task_id=action["task_id"], claim_id=action["claim_id"],
+                         scope_version=action["scope_version"], epoch=action["epoch"], action_id=aid, kind="started",
+                         evidence={"note": "delayed original process receipt", "sha256": "b"*64}, permit_id=action["permit_id"],
+                         reporter_basis={"kind": "owner", "note": "original executor"})
+
+    def test_late_started_after_safe_release_cannot_change_successor_or_original_records(self):
+        for basis in ("human-isolation", "adapter-confirmed"):
+            for owner_released in (False, True):
+                with self.subTest(basis=basis, owner_released=owner_released):
+                    self.setUp()
+                    a, b = self.prepare(), self.prepare(OTHER)
+                    self.request(a); self.start(a)
+                    if owner_released:
+                        self.release(a)
+                    queued = self.request(b)
+                    self.assertEqual(self.data["resource_requests"][queued]["state"], "queued")
+                    if basis == "adapter-confirmed":
+                        self.data["adapters"]["trusted-test"] = {"actor": PERSON, "trusted": True, "claims": ["ca"]}
+                    self.release(a, PERSON, basis)
+                    self.assertEqual(self.data["resource_requests"][queued]["state"], "granted")
+                    self.start(b)
+                    self.started_fact(b)
+                    before = deepcopy(self.state)
+                    with self.assertRaises(Rejected):
+                        self.started_fact(a)
+                    self.assertEqual(self.state, before)
+
+    def test_late_started_after_safe_release_before_next_request_cannot_revive_action(self):
+        a, b = self.prepare(), self.prepare(OTHER)
+        self.request(a); self.start(a); self.release(a)
+        self.release(a, PERSON, "human-isolation")
+        self.call("execution-fact", task_id="T01", claim_id="ca", scope_version=1, epoch=1, action_id=a, kind="unconfirmed",
+                  evidence={"note": "owner cannot independently confirm isolation", "sha256": "b"*64},
+                  permit_id=self.data["actions"][a]["permit_id"], reporter_basis={"kind": "owner", "note": "original executor"})
+        before = deepcopy(self.state)
+        with self.assertRaises(Rejected):
+            self.started_fact(a)
+        self.assertEqual(self.state, before)
+        request = self.request(b)
+        self.assertEqual(self.data["resource_requests"][request]["state"], "granted")
+        self.assertEqual(self.data["actions"][a]["state"], "unconfirmed")
+        grant = self.data["grants"][self.data["actions"][a]["grant_id"]]
+        self.assertEqual((grant["state"], grant["physical"]), ("released", "end-confirmed"))
+
+    def test_late_started_after_blocker_end_confirmation_cannot_revive_action(self):
+        a, b = self.prepare(), self.prepare(OTHER)
+        self.request(a); self.start(a); self.release(a)
+        queued = self.request(b)
+        grant_id = self.data["actions"][a]["grant_id"]
+        self.call("execution-fact", PERSON, task_id="T01", claim_id="ca", scope_version=1, epoch=1, action_id=None,
+                  kind="stopped", evidence={"note": "original process isolated", "sha256": "a"*64}, permit_id=None,
+                  reporter_basis={"kind": "human", "note": "project manager checked evidence"}, blocker_ids=[grant_id])
+        self.assertEqual(self.data["resource_requests"][queued]["state"], "granted")
+        before = deepcopy(self.state)
+        with self.assertRaises(Rejected):
+            self.started_fact(a)
+        self.assertEqual(self.state, before)
+
+    def test_confirmed_release_cannot_be_downgraded_by_later_owner_release(self):
+        for confirmation in ("human-isolation", "adapter-confirmed", "blocker-fact"):
+            with self.subTest(confirmation=confirmation):
+                self.setUp()
+                a, b = self.prepare(), self.prepare(OTHER)
+                self.request(a); self.start(a); self.release(a)
+                queued = self.request(b)
+                if confirmation == "blocker-fact":
+                    grant_id = self.data["actions"][a]["grant_id"]
+                    self.call("execution-fact", PERSON, task_id="T01", claim_id="ca", scope_version=1, epoch=1, action_id=None,
+                              kind="stopped", evidence={"note": "original process isolated", "sha256": "a"*64}, permit_id=None,
+                              reporter_basis={"kind": "human", "note": "project manager checked evidence"}, blocker_ids=[grant_id])
+                else:
+                    if confirmation == "adapter-confirmed":
+                        self.data["adapters"]["trusted-test"] = {"actor": PERSON, "trusted": True, "claims": ["ca"]}
+                    self.release(a, PERSON, confirmation)
+                self.assertEqual(self.data["resource_requests"][queued]["state"], "granted")
+                self.start(b); self.started_fact(b)
+                before = deepcopy(self.state)
+                self.release(a)
+                self.assertEqual(self.state, before)
+                with self.assertRaises(Rejected):
+                    self.started_fact(a)
+                self.assertEqual(self.state, before)
+
+    def test_late_started_after_unconfirmed_release_still_records_and_blocks(self):
+        a, b = self.prepare(), self.prepare(OTHER)
+        self.request(a); self.start(a); self.release(a)
+        queued = self.request(b)
+        fact_id = self.started_fact(a)
+        grant_id = self.data["actions"][a]["grant_id"]
+        grant = self.data["grants"][grant_id]
+        self.assertEqual(self.data["facts"][fact_id]["kind"], "started")
+        self.assertEqual(self.data["actions"][a]["state"], "running")
+        self.assertEqual((grant["state"], grant["physical"]), ("released", "in-use"))
+        self.assertTrue(self.data["blockers"][grant_id]["active"])
+        self.assertEqual(self.data["resource_requests"][queued]["state"], "queued")
+        self.release(a, PERSON, "human-isolation")
+        self.assertEqual(self.data["resource_requests"][queued]["state"], "granted")
+
+    def test_historical_started_after_safe_release_keeps_facts_without_changing_current_work(self):
+        a, b = self.prepare(), self.prepare(OTHER)
+        self.request(a); self.start(a); self.release(a)
+        self.release(a, PERSON, "human-isolation")
+        self.request(b); self.start(b)
+        for historical_by in ("epoch", "scope"):
+            with self.subTest(historical_by=historical_by):
+                self.state["claims"]["ca"]["epoch"] = 2 if historical_by == "epoch" else 1
+                self.state["claims"]["ca"]["W"]["scope"] = 2 if historical_by == "scope" else 1
+                self.state["tasks"]["T01"]["scope_version"] = self.state["claims"]["ca"]["W"]["scope"]
+                before = deepcopy(self.state)
+                fact_id = self.started_fact(a)
+                self.assertTrue(self.data["facts"][fact_id]["historical"])
+                self.assertEqual(self.data["facts"][fact_id]["kind"], "started")
+                expected = deepcopy(before)
+                expected["security"]["execution"]["facts"][fact_id] = deepcopy(self.data["facts"][fact_id])
+                self.assertEqual(self.state, expected)
+
     def test_cancel_granted_request_does_not_guess_program_stop(self):
         a = self.prepare(); request = self.request(a)
         before = deepcopy(self.data["grants"])
