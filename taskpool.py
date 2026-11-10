@@ -104,7 +104,7 @@ def pack(args):
     return 0
 
 
-def main():
+def build_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", action="version", version=f"内网任务服务 v{__version__} · {RELEASE_NAME}")
     parser.add_argument("--store", default="local", help="独立项目 .state 内的试用库名称")
@@ -151,7 +151,177 @@ def main():
     package.add_argument("--claim", type=Path, required=True)
     package.add_argument("--artifact", type=Path, action="append", required=True)
     package.add_argument("--output", type=Path, required=True)
-    args = parser.parse_args()
+    return parser
+
+
+def upgrade_control(args, store):
+    if not 0 < args.timeout <= 120:
+        raise ValueError("排空时限须大于 0 且不超过 120 秒")
+    if args.command == "backup" and (not args.archive or not args.tag):
+        raise ValueError("backup 需要 --archive 私有绝对目录和 --tag 唯一名称")
+    result = control_request(store, args.command, args.timeout, archive=args.archive, tag=args.tag)
+    emit(result)
+    return 0 if args.command not in {"freeze", "shutdown"} or result["phase"] == "frozen" else 1
+
+
+def init_admin(service):
+    status, result = service.initialize_admin()
+    if status != 200:
+        raise ClientError(result.get("message") or "管理员账号登记失败", status)
+    emit(result)
+    return 0
+
+
+def inspect_store(service, state):
+    snap = service.snapshot()
+    emit({"head": snap["head"], "head_sha256": snap["sha256"], "repo_id": service.desk.meta["repo_id"],
+          "format": state["pilot"].get("format"), "window_high_water": state["pilot"].get("serial", 0),
+          "tasks": [{"id": task["task_id"], "status": task["status"], "version": task["version"],
+                     "scope_version": task["scope_version"], "contract": task.get("contract"),
+                     "inputs": task["inputs"]} for task in state["tasks"].values()],
+          "active_claims": [{"task_id": claim["task_id"], "claim_id": claim["claim_id"],
+                             "origin": claim["origin"], "execution": claim["E"]}
+                            for claim in state["claims"].values() if claim["L"] == "active"],
+          "requests": service.db.execute("SELECT count(*) FROM requests").fetchone()[0]})
+    return 0
+
+
+def admin_recover(args, service, state):
+    from getpass import getpass
+    from pool.round_service import enabled, password_change
+    if not enabled(state) or not state["pilot"]["format"]["maintenance"]:
+        raise ClientError("管理员恢复须使用已停止服务的 v3 维护卷")
+    if args.password_file:
+        value = args.password_file.read_text(encoding="utf-8-sig")
+    else:
+        if not sys.stdin.isatty():
+            raise ClientError("请在交互终端输入或使用受限密码文件")
+        value = getpass("新管理员密码: ")
+        if value != getpass("确认密码: "):
+            raise ClientError("两次输入不一致")
+    protected = service.passwords.protect(value, ADMIN)
+    status, result = password_change(service, ADMIN, ADMIN, "admin-recovery", args.request_id, protected)
+    emit(result)
+    return 0 if status == 200 else 1
+
+
+def round_migrate(args, service):
+    body = {"request_id": "round-" + digest(encoded([args.upgrade, args.image])),
+            "upgrade": args.upgrade, "image": args.image.removeprefix("sha256:")}
+    status, result = service.submit(ADMIN, args.action, body["request_id"], body)
+    emit(result)
+    return 0 if status == 200 else 1
+
+
+def security_migrate(args, service):
+    from pool.safety import migrate
+    status,result=migrate(service,args.target,args.request_id)
+    emit(result)
+    return 0 if status == 200 else 1
+
+
+def contract_change(args, service, state):
+    """upgrade-migrate and maintenance: one administrator request through the ordinary write path."""
+    if args.action == "upgrade-migrate":
+        task = state["tasks"][args.task]
+        request_id = "migration-" + digest(encoded([args.upgrade, args.image, args.task]))
+        existing = service.db.execute("SELECT response FROM requests WHERE key=? AND status=200",
+                                      (digest(encoded([ADMIN, request_id])),)).fetchone()
+        if existing:
+            emit(json.loads(existing[0]))
+            return 0
+        body = {"request_id": request_id, "task_id": args.task, "upgrade": args.upgrade,
+                "image": args.image.removeprefix("sha256:"), "version": task["version"],
+                "scope_version": task["scope_version"]}
+        action = args.action
+    else:
+        body = {"request_id": args.request_id, "enabled": args.mode == "on"}
+        action = "maintenance-mode"
+    status, result = service.submit(ADMIN, action, body["request_id"], body)
+    emit(result)
+    return 0 if status == 200 else 1
+
+
+def serve(args, service, config, store):
+    if not 0 <= args.port <= 65535:
+        raise ClientError("端口须在 0 至 65535 之间")
+    tls = None
+    fingerprint = None
+    if args.lan_name or args.lan_alias or args.tls_cert or args.tls_key:
+        if (not args.lan_name or not all(re.fullmatch(r"[a-z0-9][a-z0-9.-]{0,120}", name)
+                for name in [args.lan_name, *args.lan_alias])
+                or not args.tls_cert or not args.tls_key or not args.port):
+            raise ClientError("局域网入口需要主机名、证书、私钥和固定端口")
+        tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        tls.minimum_version = ssl.TLSVersion.TLSv1_2
+        tls.load_cert_chain(args.tls_cert, args.tls_key)
+        pem = args.tls_cert.read_text(encoding="ascii").split("-----END CERTIFICATE-----", 1)[0]
+        fingerprint = digest(ssl.PEM_cert_to_DER_cert(pem + "-----END CERTIFICATE-----"))
+    with Server(args.port, service, config["tokens"], tls, args.lan_name, args.lan_alias, fingerprint) as server:
+        from pool.safety import record_configuration
+        record_configuration(service, {'service_version':__version__, 'port':server.server_address[1],
+            'lan_name':args.lan_name, 'lan_aliases':args.lan_alias,
+            'tls_cert':str(args.tls_cert) if args.tls_cert else None,
+            'tls_key':str(args.tls_key) if args.tls_key else None,
+            'launch_config_sha256':os.environ.get('TASKPOOL_LAUNCH_CONFIG_SHA256')})
+        scheme, host = ("https", args.lan_name) if tls else ("http", "127.0.0.1")
+        def graceful_shutdown():
+            service.lifecycle.drain()
+            try:
+                result = service.lifecycle.freeze(30)
+            except ValueError:
+                print("一致性备份仍在完成，本次停服已取消；请等待备份结束后重试", file=sys.stderr, flush=True)
+                return
+            if result["phase"] == "frozen":
+                server.shutdown()
+            else:
+                print("排空超时，已取消停服，请检查升级控制状态", file=sys.stderr, flush=True)
+        def on_signal(_number, _frame):
+            threading.Thread(target=graceful_shutdown, name="graceful-stop", daemon=True).start()
+        signals = {kind: signal.getsignal(kind) for kind in (signal.SIGTERM, signal.SIGINT)}
+        for kind in signals:
+            signal.signal(kind, on_signal)
+        try:
+            control_context = Control(store, service.lifecycle, server.shutdown, service.consistent_backup) if os.name == "posix" else nullcontext()
+            with control_context:
+                emit({"url": f"{scheme}://{host}:{server.server_address[1]}", "store": str(store)})
+                server.serve_forever()
+        finally:
+            for kind, previous in signals.items():
+                signal.signal(kind, previous)
+    return 0
+
+
+def run_with_service(args, service, config, store):
+    """Everything that needs the opened ledger: recover pending requests, then run the command."""
+    state = service.snapshot()['state']
+    if (args.action=='serve' and state.get('pilot',{}).get('format',{}).get('schema',0) in {3,4}
+            and (args.port!=0 or args.lan_name)):
+        raise ClientError('启动新版服务前须先独占运行 security-migrate --target 5 --request-id <稳定编号>',409)
+    if args.action not in {'security-migrate','inspect-store'} and not service.recover():
+        raise Unavailable("有未得到终局决定的请求")
+    state = service.snapshot()["state"]
+    if any(role not in state["origins"].get(name, {}).get("roles", []) for name, role in config["roles"].items()):
+        raise Unavailable("身份登记未完成，请重跑 init")
+    if args.action == "add-task":
+        return add_task(args, service, config)
+    if args.action == "init-admin":
+        return init_admin(service)
+    if args.action == "inspect-store":
+        return inspect_store(service, state)
+    if args.action == "admin-recover":
+        return admin_recover(args, service, state)
+    if args.action == "round-migrate":
+        return round_migrate(args, service)
+    if args.action == 'security-migrate':
+        return security_migrate(args, service)
+    if args.action in {"upgrade-migrate", "maintenance"}:
+        return contract_change(args, service, state)
+    return serve(args, service, config, store)
+
+
+def main():
+    args = build_parser().parse_args()
     try:
         if sys.version_info < (3, 13):
             raise ClientError("任务池运行需要 Python 3.13 或更新版本")
@@ -163,13 +333,7 @@ def main():
             os.umask(0o077)
         store = state_path(args.store)
         if args.action == "upgrade-control":
-            if not 0 < args.timeout <= 120:
-                raise ValueError("排空时限须大于 0 且不超过 120 秒")
-            if args.command == "backup" and (not args.archive or not args.tag):
-                raise ValueError("backup 需要 --archive 私有绝对目录和 --tag 唯一名称")
-            result = control_request(store, args.command, args.timeout, archive=args.archive, tag=args.tag)
-            emit(result)
-            return 0 if args.command not in {"freeze", "shutdown"} or result["phase"] == "frozen" else 1
+            return upgrade_control(args, store)
         if args.action == "init":
             store.mkdir(parents=True, exist_ok=True)
         with exclusive(store):
@@ -179,128 +343,7 @@ def main():
             config = read_json(safe(store, "credentials.json"))
             service = Service(store)
             try:
-                state = service.snapshot()['state']
-                if (args.action=='serve' and state.get('pilot',{}).get('format',{}).get('schema',0) in {3,4}
-                        and (args.port!=0 or args.lan_name)):
-                    raise ClientError('启动新版服务前须先独占运行 security-migrate --target 5 --request-id <稳定编号>',409)
-                if args.action not in {'security-migrate','inspect-store'} and not service.recover():
-                    raise Unavailable("有未得到终局决定的请求")
-                state = service.snapshot()["state"]
-                if any(role not in state["origins"].get(name, {}).get("roles", []) for name, role in config["roles"].items()):
-                    raise Unavailable("身份登记未完成，请重跑 init")
-                if args.action == "add-task":
-                    return add_task(args, service, config)
-                if args.action == "init-admin":
-                    status, result = service.initialize_admin()
-                    if status != 200:
-                        raise ClientError(result.get("message") or "管理员账号登记失败", status)
-                    emit(result)
-                    return 0
-                if args.action == "inspect-store":
-                    snap = service.snapshot()
-                    emit({"head": snap["head"], "head_sha256": snap["sha256"], "repo_id": service.desk.meta["repo_id"],
-                          "format": state["pilot"].get("format"), "window_high_water": state["pilot"].get("serial", 0),
-                          "tasks": [{"id": task["task_id"], "status": task["status"], "version": task["version"],
-                                     "scope_version": task["scope_version"], "contract": task.get("contract"),
-                                     "inputs": task["inputs"]} for task in state["tasks"].values()],
-                          "active_claims": [{"task_id": claim["task_id"], "claim_id": claim["claim_id"],
-                                             "origin": claim["origin"], "execution": claim["E"]}
-                                            for claim in state["claims"].values() if claim["L"] == "active"],
-                          "requests": service.db.execute("SELECT count(*) FROM requests").fetchone()[0]})
-                    return 0
-                if args.action == "admin-recover":
-                    from getpass import getpass
-                    from pool.round_service import enabled, password_change
-                    if not enabled(state) or not state["pilot"]["format"]["maintenance"]:
-                        raise ClientError("管理员恢复须使用已停止服务的 v3 维护卷")
-                    if args.password_file:
-                        value = args.password_file.read_text(encoding="utf-8-sig")
-                    else:
-                        if not sys.stdin.isatty():
-                            raise ClientError("请在交互终端输入或使用受限密码文件")
-                        value = getpass("新管理员密码: ")
-                        if value != getpass("确认密码: "):
-                            raise ClientError("两次输入不一致")
-                    protected = service.passwords.protect(value, ADMIN)
-                    status, result = password_change(service, ADMIN, ADMIN, "admin-recovery", args.request_id, protected)
-                    emit(result)
-                    return 0 if status == 200 else 1
-                if args.action == "round-migrate":
-                    body = {"request_id": "round-" + digest(encoded([args.upgrade, args.image])),
-                            "upgrade": args.upgrade, "image": args.image.removeprefix("sha256:")}
-                    status, result = service.submit(ADMIN, args.action, body["request_id"], body)
-                    emit(result)
-                    return 0 if status == 200 else 1
-                if args.action == 'security-migrate':
-                    from pool.safety import migrate
-                    status,result=migrate(service,args.target,args.request_id)
-                    emit(result)
-                    return 0 if status == 200 else 1
-                if args.action in {"upgrade-migrate", "maintenance"}:
-                    if args.action == "upgrade-migrate":
-                        task = state["tasks"][args.task]
-                        request_id = "migration-" + digest(encoded([args.upgrade, args.image, args.task]))
-                        existing = service.db.execute("SELECT response FROM requests WHERE key=? AND status=200",
-                                                      (digest(encoded([ADMIN, request_id])),)).fetchone()
-                        if existing:
-                            emit(json.loads(existing[0]))
-                            return 0
-                        body = {"request_id": request_id, "task_id": args.task, "upgrade": args.upgrade,
-                                "image": args.image.removeprefix("sha256:"), "version": task["version"],
-                                "scope_version": task["scope_version"]}
-                        action = args.action
-                    else:
-                        body = {"request_id": args.request_id, "enabled": args.mode == "on"}
-                        action = "maintenance-mode"
-                    status, result = service.submit(ADMIN, action, body["request_id"], body)
-                    emit(result)
-                    return 0 if status == 200 else 1
-                if not 0 <= args.port <= 65535:
-                    raise ClientError("端口须在 0 至 65535 之间")
-                tls = None
-                fingerprint = None
-                if args.lan_name or args.lan_alias or args.tls_cert or args.tls_key:
-                    if (not args.lan_name or not all(re.fullmatch(r"[a-z0-9][a-z0-9.-]{0,120}", name)
-                            for name in [args.lan_name, *args.lan_alias])
-                            or not args.tls_cert or not args.tls_key or not args.port):
-                        raise ClientError("局域网入口需要主机名、证书、私钥和固定端口")
-                    tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-                    tls.minimum_version = ssl.TLSVersion.TLSv1_2
-                    tls.load_cert_chain(args.tls_cert, args.tls_key)
-                    pem = args.tls_cert.read_text(encoding="ascii").split("-----END CERTIFICATE-----", 1)[0]
-                    fingerprint = digest(ssl.PEM_cert_to_DER_cert(pem + "-----END CERTIFICATE-----"))
-                with Server(args.port, service, config["tokens"], tls, args.lan_name, args.lan_alias, fingerprint) as server:
-                    from pool.safety import record_configuration
-                    record_configuration(service, {'service_version':__version__, 'port':server.server_address[1],
-                        'lan_name':args.lan_name, 'lan_aliases':args.lan_alias,
-                        'tls_cert':str(args.tls_cert) if args.tls_cert else None,
-                        'tls_key':str(args.tls_key) if args.tls_key else None,
-                        'launch_config_sha256':os.environ.get('TASKPOOL_LAUNCH_CONFIG_SHA256')})
-                    scheme, host = ("https", args.lan_name) if tls else ("http", "127.0.0.1")
-                    def graceful_shutdown():
-                        service.lifecycle.drain()
-                        try:
-                            result = service.lifecycle.freeze(30)
-                        except ValueError:
-                            print("一致性备份仍在完成，本次停服已取消；请等待备份结束后重试", file=sys.stderr, flush=True)
-                            return
-                        if result["phase"] == "frozen":
-                            server.shutdown()
-                        else:
-                            print("排空超时，已取消停服，请检查升级控制状态", file=sys.stderr, flush=True)
-                    def on_signal(_number, _frame):
-                        threading.Thread(target=graceful_shutdown, name="graceful-stop", daemon=True).start()
-                    signals = {kind: signal.getsignal(kind) for kind in (signal.SIGTERM, signal.SIGINT)}
-                    for kind in signals:
-                        signal.signal(kind, on_signal)
-                    try:
-                        control_context = Control(store, service.lifecycle, server.shutdown, service.consistent_backup) if os.name == "posix" else nullcontext()
-                        with control_context:
-                            emit({"url": f"{scheme}://{host}:{server.server_address[1]}", "store": str(store)})
-                            server.serve_forever()
-                    finally:
-                        for kind, previous in signals.items():
-                            signal.signal(kind, previous)
+                return run_with_service(args, service, config, store)
             finally:
                 service.close()
     except KeyboardInterrupt:
