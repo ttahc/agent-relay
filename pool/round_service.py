@@ -38,7 +38,8 @@ def source(raw, state, owner):
     from .upgrade import source_profile
     if not isinstance(raw, dict):
         raise ClientError("须填写来源资料")
-    allowed = {"platform", "session", "model", "environment", "device", "directory", "url", "parent", "session_source", "window_name"}
+    allowed = {"platform", "session", "model", "environment", "device", "directory", "url", "parent",
+               "session_source", "window_name"}
     if not raw.keys() <= allowed or not raw.get("session"):
         raise ClientError("须提供平台会话或已持久保存的本地来源标识")
     origin = raw.get("session_source", "reported")
@@ -74,7 +75,8 @@ def plan(service, actor, action, key, body, state):
         p.update(invite_id=identifier(body["invite_id"], "邀请编号"), reason=string(body["reason"], "撤销依据"))
         extra["invite_id"] = p["invite_id"]
     elif action == "ai-prepare":
-        p.update({k: body[k] for k in ("invite_id", "registration_id", "name", "source", "source_sha", "proof_sha", "project_id")})
+        p.update({k: body[k]
+                  for k in ("invite_id", "registration_id", "name", "source", "source_sha", "proof_sha", "project_id")})
         extra["registration_id"] = p["registration_id"]
     elif action == "token-prepare":
         fields(body, "request_id name version reason proof_sha")
@@ -155,7 +157,8 @@ def pending_result(service, registration_id, proof_sha):
     if record["state"] == "active":
         return {**value, "status": "active"}
     allowed = (usable_invite(state, state["round"].get("invite:" + record["invite_id"])) if record["kind"] == "invite"
-               else rotation_allowed(state, record["issuer"], record["name"]) and subject["credential"] + 1 == record["version"])
+               else (rotation_allowed(state, record["issuer"], record["name"])
+                     and subject["credential"] + 1 == record["version"]))
     if record["state"] != "pending" or record["deadline"] <= time.time() or not allowed:
         raise ClientError("待激活登记已过期、撤销或失去授权", 403)
     return {**value, "status": "pending_activation", "token": token_for(service, record)}
@@ -219,7 +222,8 @@ def result(service, action, response):
     record = state["round"].get("invite:" + invite_id)
     if not usable_invite(state, record) or record["expires"] <= time.time() or record["used"] >= record["count"]:
         return response
-    return {**response, "invitation": {**record, "code": service.accounts.token("ai-invite", invite_id, record["issuer"])}}
+    return {**response,
+            "invitation": {**record, "code": service.accounts.token("ai-invite", invite_id, record["issuer"])}}
 
 
 def invitations(state, actor):
@@ -375,7 +379,8 @@ class Notices:
         returned = self._returned(state, actor)
         if returned:
             entries = service.snapshot().get("entries", [])
-            returned = {event: (task, next((review for review in service._delivery_reviews(state, task, [claim], entries)
+            returned = {event: (task,
+                                next((review for review in service._delivery_reviews(state, task, [claim], entries)
                                           if review["revision"] == name), None))
                         for event, (task, claim, name) in returned.items() if service.visible(state, task, actor)}
             returned = {event: value for event, value in returned.items() if value[1] is not None}
@@ -383,9 +388,11 @@ class Notices:
         with self.db:
             if execution_settings(state, actor)["heartbeat"]:
                 self.pulse(actor)
-            self.db.executemany("INSERT OR IGNORE INTO round_notices(event_id,actor,task,created,due) VALUES(?,?,?,?,?)",
+            self.db.executemany("INSERT OR IGNORE INTO round_notices(event_id,actor,task,created,due) "
+                                "VALUES(?,?,?,?,?)",
                                 ((event, actor, task["task_id"], now, now) for event, task in ready.items()))
-            self.db.executemany("INSERT OR IGNORE INTO round_notices(event_id,actor,task,created,due) VALUES(?,?,?,?,?)",
+            self.db.executemany("INSERT OR IGNORE INTO round_notices(event_id,actor,task,created,due) "
+                                "VALUES(?,?,?,?,?)",
                                 ((event, actor, task["task_id"], now, now) for event, (task, _) in returned.items()))
             rows = self.db.execute("SELECT seq,event_id,created,attempts,due,last_poll FROM round_notices "
                                    "WHERE actor=? AND ack IS NULL AND (attempts<6 OR last_poll=?) ORDER BY seq",
@@ -398,7 +405,8 @@ class Notices:
                     attempts += 1
                     self.db.execute("UPDATE round_notices SET attempts=?,sent=?,due=?,last_poll=? WHERE seq=?",
                                     (attempts, now, now + min(300, 5 * 2 ** (attempts - 1)), request, seq))
-                    self.db.execute("INSERT OR IGNORE INTO round_notice_log(event_id,actor,stage,at,request) VALUES(?,?,?,?,?)",
+                    self.db.execute("INSERT OR IGNORE INTO round_notice_log(event_id,actor,stage,at,request) "
+                                    "VALUES(?,?,?,?,?)",
                                     (event, actor, "sent", now, request))
                 cursor = max(seq, cursor)
                 notification = {"event_id": event, "task_id": task["task_id"], "version": task["version"],
@@ -406,7 +414,8 @@ class Notices:
                 if event in returned:
                     review = returned[event][1]
                     notification.update(type="review-returned", auto=False,
-                                        **{key: review[key] for key in ("claim_id", "revision", "manifest_sha256", "acceptance_id",
+                                        **{key: review[key]
+                                           for key in ("claim_id", "revision", "manifest_sha256", "acceptance_id",
                                                                        "failed_criteria", "reason", "reviewer", "at")})
                 else:
                     notification.update(type="task-ready", reason="任务就绪", auto=automation_allowed(state, task, actor))
@@ -421,7 +430,8 @@ class Notices:
         event = sha256(body["event_id"])
         request = identifier(body["request_id"], "确认编号")
         with self.db:
-            row = self.db.execute("SELECT ack,sent FROM round_notices WHERE event_id=? AND actor=?", (event, actor)).fetchone()
+            row = self.db.execute("SELECT ack,sent FROM round_notices WHERE event_id=? AND actor=?",
+                                  (event, actor)).fetchone()
             if not row or row[1] is None:
                 raise ClientError("通知不存在或尚未发送", 404)
             now = row[0] or int(time.time())
@@ -445,7 +455,8 @@ class Notices:
                 raise ClientError("没有可重投的通知", 404)
             if ready_key(task, row[0]) != event and event not in self._returned(state, row[0]):
                 raise ClientError("原通知的任务版本已变化", 409)
-            recorded = self.db.execute("INSERT OR IGNORE INTO round_notice_log(event_id,actor,stage,at,request) VALUES(?,?,?,?,?)",
+            recorded = self.db.execute("INSERT OR IGNORE INTO round_notice_log(event_id,actor,stage,at,request) "
+                                       "VALUES(?,?,?,?,?)",
                                        (event, actor, "retry", int(time.time()), request))
             if recorded.rowcount:
                 self.db.execute("UPDATE round_notices SET due=0,attempts=0,last_poll=NULL WHERE event_id=?", (event,))

@@ -20,7 +20,8 @@ ACTION_LABELS = {"read": "读取", "claim": "领取任务", "deliver": "上传�
                  "capability-save": "申报自身技能",
                  "register": "创建任务", "task-publish": "开放任务", "task-hold": "暂缓任务", "feedback-update": "处理反馈"}
 COMMANDS = {"claim": {"claim"}, "deliver": {"seal"}, "deliver-files": {"seal", "stopped"},
-            "stop": {"stopped"}, "handoff": {"replace_claim", "stopped", "release"}, "register": {"propose", "register"},
+            "stop": {"stopped"}, "handoff": {"replace_claim", "stopped", "release"},
+            "register": {"propose", "register"},
             "resume": {"acquire", "resume", "ack_scope"}}
 PILOT_OPS = {"task-publish": "publish", "task-hold": "hold", "feedback-save": "feedback-save",
              "feedback-update": "feedback-update", "run-report": "run-report", "capability-save": "capability"}
@@ -38,7 +39,8 @@ def target(state, operation, body):
     if not isinstance(project, str):
         project = None
     if operation == "capability-resolve":
-        verification = state.get("round", {}).get("verification:" + str(body.get("verification_id") or body.get("id"))) or {}
+        verification = (state.get("round", {}).get("verification:" + str(body.get("verification_id") or body.get("id")))
+                        or {})
         project = verification.get("project_id")
     if operation == "feedback-update":
         record = state.get("round", {}).get("feedback:" + str(body.get("id"))) or {}
@@ -116,13 +118,15 @@ def effective_roles(state, project, actor, base_roles):
         return set(base_roles)
     operation = _CURRENT.get()["operation"]
     extra = {"manager"} if operation in DELEGATION_MANAGEMENT else (
-        {"executor"} if operation in DELEGATION_EXECUTION or operation == "capability-save" else {"reporter"} if operation == "feedback-save" else {"observer"})
+        {"executor"} if operation in DELEGATION_EXECUTION or operation == "capability-save"
+        else {"reporter"} if operation == "feedback-save" else {"observer"})
     return set(base_roles) | extra
 
 
 def enforce_capability_self(actor, body):
     record = body.get("record") or body
-    rules.require(isinstance(record, dict) and body.get("name") == actor and record.get("kind") == "skill" and record.get("level") == "declared",
+    rules.require(isinstance(record, dict) and body.get("name") == actor and record.get("kind") == "skill"
+                  and record.get("level") == "declared",
                   "受托能力申报仅限 AI 自身的已声明技能", "intent-final")
 
 
@@ -161,7 +165,8 @@ def plan(service, actor, action, key, body, state):
         raise ClientError("委托须由人员本人办理", 403)
     if action == "delegate-grant":
         duration = "duration_seconds" in body
-        fields(body, "request_id executor_id project_id actions task_ids version reason " + ("duration_seconds" if duration else "expires"))
+        fields(body, "request_id executor_id project_id actions task_ids version reason "
+               + ("duration_seconds" if duration else "expires"))
         executor = identifier(body["executor_id"], "AI 窗口")
         project = identifier(body["project_id"], "项目")
         if duration:
@@ -190,10 +195,13 @@ def view(state, actor, now=None):
     result = []
     for record in records(state, actor):
         status = "revoked" if record["revoked"] else "expired" if record["expires"] <= when else "active"
-        if status == "active" and not all(delegable(state, record["delegator"], record["project_id"], action) for action in record["actions"]):
+        if (status == "active" and not all(delegable(state, record["delegator"], record["project_id"], action)
+                                           for action in record["actions"])):
             status = "restricted"
         subject = rules.identity(state, record["executor_id"]) or {}
-        if status == "active" and (not rules.active(state, record["executor_id"]) or subject.get("owner") != record["delegator"]):
+        if (status == "active"
+            and (not rules.active(state, record["executor_id"]) or subject.get("owner") != record["delegator"])):
             status = "restricted"
-        result.append({**record, "status": status, "window": subject.get("window"), "window_name": subject.get("window_name")})
+        result.append({**record, "status": status, "window": subject.get("window"),
+                       "window_name": subject.get("window_name")})
     return sorted(result, key=lambda row: (row["executor_id"], row["project_id"]))

@@ -51,7 +51,8 @@ def role_list(value, allowed):
 
 def grantable(state):
     # Reporter and observer are view-level tiers; the ledger keeps ignoring them for execution and review.
-    return rules.ROLES | {"reporter", "observer"} if state["pilot"]["format"]["schema"] >= rules.ROUND_VERSION else rules.ROLES
+    return (rules.ROLES | {"reporter", "observer"} if state["pilot"]["format"]["schema"] >= rules.ROUND_VERSION
+            else rules.ROLES)
 
 
 def decide(state, env, context):
@@ -113,15 +114,18 @@ def window_name(value):
 
 
 def scope_contract(state, body, task_id=None):
-    data = {key: body[key] for key in ("project_id", "iteration", "delivery", "requirements", "review_mode", "user_basis")}
+    data = {key: body[key]
+            for key in ("project_id", "iteration", "delivery", "requirements", "review_mode", "user_basis")}
     if "dispatch" in body:
         data["dispatch"] = body["dispatch"]
     spec = rules.task_spec(state, data, task_id)
-    return spec, rules.dependency_rows(state, body["dependencies"], spec["project_id"], task_id), rules.resources(body["resources"])
+    return (spec, rules.dependency_rows(state, body["dependencies"], spec["project_id"], task_id),
+            rules.resources(body["resources"]))
 
 
 SCOPE_FIELDS = "project_id iteration delivery requirements review_mode user_basis resources dependencies"
-MAINTENANCE_ACTIONS = {"maintenance-mode", "identity-bind", "project-save", "project-grant"}  # allowed during maintenance
+MAINTENANCE_ACTIONS = {"maintenance-mode", "identity-bind", "project-save",
+                       "project-grant"}  # allowed during maintenance
 
 
 class Operation:
@@ -213,12 +217,14 @@ def register(service, actor, key, body, state, expects):
     if state["pilot"]["format"]["schema"] >= rules.ROUND_VERSION and "dispatch" not in spec:
         spec["dispatch"] = {**DEFAULT_POLICY, "owner": rules.responsible(state, actor) or ""}
     project = spec["project_id"]
-    if not (rules.manager(state, project, actor) or actor == receiver and "receiver" in rules.roles(state, project, actor)):
+    if not (rules.manager(state, project, actor) or actor == receiver
+            and "receiver" in rules.roles(state, project, actor)):
         raise ClientError("须有项目任务登记权限", 403)
     if "receiver" not in rules.roles(state, project, receiver):
         raise ClientError("须选择获授权的项目接收者")
     path = f"inputs/{digest(raw)}/brief.md"
-    prepared = service.registration(actor, key, title, criteria, receiver, path, raw, expects, rules.project_record(state, project)["name"])
+    prepared = service.registration(actor, key, title, criteria, receiver, path, raw, expects,
+                                    rules.project_record(state, project)["name"])
     prepared["steps"][-1]["payload"].update(contract=spec, resources=resources, dependencies=dependencies)
     return prepared
 
@@ -243,7 +249,8 @@ def identity_bind(op):
     fields(body, "request_id name kind owner reason source")
     name = identifier(body["name"], "原身份")
     kind = body["kind"]
-    if not isinstance(kind, str) or kind not in {"human", "executor"} or kind == "human" and (body["owner"] != name or body["source"] is not None):
+    if (not isinstance(kind, str) or kind not in {"human", "executor"} or kind == "human"
+        and (body["owner"] != name or body["source"] is not None)):
         raise ClientError("人员绑定须归本人，执行端须提供责任账号及会话资料")
     owner = identifier(body["owner"], "责任账号")
     return {"op": "bind", "name": name, "kind": kind, "owner": owner,
@@ -337,7 +344,8 @@ def capability_save(op):
     elif evidence["sha256"] != "":
         raise ClientError("证据指纹格式无效")
     environment = string(body["environment"], "环境标识", 160)
-    if security_schema(state) < 5 and body["kind"] == "environment" and environment != (rules.identity(state, name) or {}).get("environment", "human"):
+    if (security_schema(state) < 5 and body["kind"] == "environment"
+        and environment != (rules.identity(state, name) or {}).get("environment", "human")):
         raise ClientError("证据与执行端登记的环境不一致")
     payload = {"op": "capability", "project_id": project,
                "name": name, "id": capability, "version": version(body["version"]), "record": {
@@ -345,7 +353,8 @@ def capability_save(op):
                    "evidence": evidence, "environment": environment, "expires": body["expires"],
                }}
     if security_schema(state) >= 5:
-        selected = context_record(state, name, {'context_id': body['context_id'], 'version': body['context_version']}) if body.get('context_id') else None
+        selected = (context_record(state, name, {'context_id': body['context_id'], 'version': body['context_version']})
+                    if body.get('context_id') else None)
         payload['record'].update(bind_evidence(state, name, payload['record'], selected, project, capability,
             body.get('context_dimensions'), body['level'] in {'verified', 'probed'}))
     return payload
@@ -357,7 +366,8 @@ def task_operation(op):
     kind = op.action.removeprefix("task-")
     suffix = {"publish": "scope_version", "hold": "scope_version", "scope": "scope_version " + SCOPE_FIELDS,
               "interrupt": "claim_id epoch", "recover": "claim_id epoch evidence notes unresolved"}[kind]
-    fields(body, "request_id task_id version reason " + suffix + (" dispatch" if kind == "scope" and "dispatch" in body else ""))
+    fields(body, "request_id task_id version reason " + suffix
+           + (" dispatch" if kind == "scope" and "dispatch" in body else ""))
     task_id = identifier(body["task_id"], "任务编号")
     task = state["tasks"].get(task_id)
     if not task or not rules.contract(task) or not rules.visible(state, task, actor):
@@ -374,7 +384,8 @@ def task_operation(op):
         spec, dependencies, resources = scope_contract(state, body, task_id)
         payload.update(contract=spec, dependencies=dependencies, resources=resources)
     if kind in {"interrupt", "recover"}:
-        cid = identifier(body["claim_id"], "领取编号") if len(str(body["claim_id"])) <= 80 else string(body["claim_id"], "领取编号", 100)
+        cid = (identifier(body["claim_id"], "领取编号") if len(str(body["claim_id"])) <= 80
+               else string(body["claim_id"], "领取编号", 100))
         claim = state["claims"].get(cid)
         if not claim or claim["task_id"] != task_id:
             raise ClientError("领取与任务不匹配", 409)
@@ -497,7 +508,8 @@ def activity_rows(service, snap, actor, limit=1000):
         subject = rules.identity(state, record["actor"]) or {}
         rows.append({**record, "task_id": known[0], "title": task["title"], "project": rules.task_project(task),
                      "window_name": record.get("window_name") or subject.get("window_name"),
-                     "committed_utc": entry.get("committed_utc"), "command": entry["command"], "result": entry["result"],
+                     "committed_utc": entry.get("committed_utc"), "command": entry["command"],
+                     "result": entry["result"],
                      "reason": entry["reason"] or record.get("reason")})
     return rows
 
@@ -520,7 +532,8 @@ def audit_rows(service, snap, actor, query):
         return actor in {record.get("actor"), record.get("owner")}
 
     def matches(ids, record):
-        return (not task_id or task_id in ids) and (not source or source in {record.get("actor"), record.get("origin_id")}) and (
+        return (not task_id or task_id in ids) and (not source
+                                                    or source in {record.get("actor"), record.get("origin_id")}) and (
             not request_id or record.get("request_id") == request_id)
 
     for entry in snap["entries"]:
@@ -560,7 +573,8 @@ def audit_rows(service, snap, actor, query):
             "ORDER BY r.rowid"):
         record = json.loads(raw)
         ids = {record["task_id"]} if record.get("task_id") else set()
-        if (status is not None and (record["actor"], record["request_id"]) in seen) or not matches(ids, record) or not allowed(ids, record):
+        if ((status is not None and (record["actor"], record["request_id"]) in seen) or not matches(ids, record)
+            or not allowed(ids, record)):
             continue
         value = json.loads(response) if response else {}
         rows.append({**record, "tasks": sorted(ids), "seq": None, "committed_utc": None,

@@ -30,16 +30,20 @@ def delivery_reviews(service, state, task, claims, entries=None):
         for name, delivery in claim.get("deliveries", {}).items():
             acceptance_id = delivery.get("acceptance_id")
             review = state.get("acceptances", {}).get(acceptance_id)
-            if (not review or review.get("acceptance_id") != acceptance_id or review.get("task_id") != task["task_id"] or
+            if (not review or review.get("acceptance_id") != acceptance_id or
+                    review.get("task_id") != task["task_id"] or
                     review.get("claim_id") != claim["claim_id"] or review.get("revision") != name or
-                    delivery.get("revision", name) != name or review.get("manifest_sha256") != delivery.get("manifest_sha256") or
+                    delivery.get("revision", name) != name or
+                    review.get("manifest_sha256") != delivery.get("manifest_sha256") or
                     review.get("scope_version") != delivery.get("scope_version") or
                     review.get("manifest") is not None and review["manifest"] != delivery.get("manifest")):
                 continue
             if entries is None:
                 entries = service.snapshot().get("entries", [])
-            event = next((entry for entry in entries if entry.get("type") == "decision" and entry.get("result") == "applied" and
-                          entry.get("command") == "review" and entry.get("key") == str(review.get("origin")) + "/" + str(acceptance_id) and
+            event = next((entry for entry in entries
+                          if entry.get("type") == "decision" and entry.get("result") == "applied" and
+                          entry.get("command") == "review" and
+                          entry.get("key") == str(review.get("origin")) + "/" + str(acceptance_id) and
                           entry.get("origin_id") == review.get("origin") and
                           (review.get("seq") is None or entry.get("ledger_seq") == review["seq"]) and
                           any(effect.get("path") == ["acceptances", acceptance_id] and effect.get("value") == review
@@ -49,11 +53,13 @@ def delivery_reviews(service, state, task, claims, entries=None):
                                        if check.get("id") in failed and isinstance(check.get("evidence"), dict) and
                                        isinstance(check["evidence"].get("note"), str) and check["evidence"]["note"]))
             request = (event or {}).get("request", {})
-            reason = request.get("reason") if isinstance(request.get("reason"), str) and request["reason"] else "\n".join(notes)
+            reason = (request.get("reason") if isinstance(request.get("reason"), str) and request["reason"]
+                      else "\n".join(notes))
             metadata = {"acceptance_id": acceptance_id, "failed_criteria": failed, "reason": reason,
                         "reviewer": request.get("actor") or review.get("origin"),
                         "at": (event or {}).get("committed_utc"), "source_event": (event or {}).get("key")}
-            result.append({"claim_id": claim["claim_id"], "revision": name, "manifest": deepcopy(delivery.get("manifest")),
+            result.append({"claim_id": claim["claim_id"], "revision": name,
+                           "manifest": deepcopy(delivery.get("manifest")),
                            "manifest_sha256": delivery.get("manifest_sha256"), **metadata,
                            "review": {**deepcopy(review), **metadata}})
     return result
@@ -63,7 +69,8 @@ def task_view(service, state, task, actor):
     if not service.visible(state, task, actor):
         raise ClientError("任务不存在或无权查看", 404)
     claims = [state["claims"][cid] for cid in task["claims"]]
-    admin = service.is_admin(actor) or round_service.enabled(state) and rules.manager(state, rules.task_project(task), actor)
+    admin = (service.is_admin(actor) or round_service.enabled(state)
+             and rules.manager(state, rules.task_project(task), actor))
     permitted = [c for c in claims if admin or actor in {c["origin"], task["receiver"]}]
     spec = rules.contract(task)
     project = rules.project_record(state, spec["project_id"]) if spec else None
@@ -73,10 +80,13 @@ def task_view(service, state, task, actor):
             "claims": deepcopy(permitted),
             'execution_protocol': 5 if security_schema(state) == 5 else None,
             'default_context': state.get('security', {}).get('execution', {}).get('defaults', {}).get(actor),
-            'execution_contexts': [deepcopy(row) for row in state.get('security', {}).get('execution', {}).get('contexts', {}).values()
-                                  if row.get('executor_id') == actor],
+            'execution_contexts': [
+                deepcopy(row)
+                for row in state.get('security', {}).get('execution', {}).get('contexts', {}).values()
+                if row.get('executor_id') == actor],
             "delivery_reviews": service._delivery_reviews(state, task, [c for c in permitted if
-                actor in {c["origin"], task["receiver"]} or service.is_admin(actor) or rules.system_admin(state, actor)]),
+                actor in {c["origin"], task["receiver"]} or service.is_admin(actor) or
+                rules.system_admin(state, actor)]),
             "handoffs": service.handoffs(state, task) if any(c["origin"] == actor and c["L"] == "active"
                                                       for c in claims) or actor == task["receiver"] or admin else [],
             "qualification": service.qualification(state, task, actor)}
@@ -120,7 +130,8 @@ def detail(service, state, task, actor):
                                "review": review})
     return {**view, "active": current if current in view["claims"] else None,
             "roles": service.task_roles(state, task, actor) if rules.contract(task) else service.roles(state, actor),
-            "direct_roles": service.independent_roles(state, task, actor) if rules.contract(task) else service.roles(state, actor),
+            "direct_roles": service.independent_roles(state, task, actor) if rules.contract(task)
+            else service.roles(state, actor),
             "delegated_actions": service.delegated_actions(state, task, actor),
             "deliveries": deliveries,
             "window": (rules.identity(state, current["origin"]) or {}).get("window") if current else None,
@@ -166,6 +177,7 @@ def feedback_due(service, state, actor, project=None):
 
 def task_summary(task):
     result = {k: task[k] for k in ('task_id', 'title', 'status', 'stage', 'version', 'scope_version', 'priority',
-                'project_name', 'qualification', 'holder', 'holder_window', 'holder_window_name', 'receiver') if k in task}
+                'project_name', 'qualification', 'holder', 'holder_window', 'holder_window_name', 'receiver')
+              if k in task}
     result['project_id'] = rules.task_project(task)
     return result

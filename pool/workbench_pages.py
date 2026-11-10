@@ -41,10 +41,12 @@ def stack(tasks):
     parts = counts(tasks)
     for key, name, n in parts:
         width = n / total * 100
-        bars += f'<rect class="f-{key}" x="{x:.3f}" y="0" width="{width:.3f}" height="8"><title>{name} {n}</title></rect>'
+        bars += (f'<rect class="f-{key}" x="{x:.3f}" y="0" width="{width:.3f}" height="8">'
+                 f'<title>{name} {n}</title></rect>')
         x += width
     label = "、".join(f"{name} {n}" for _, name, n in parts) or "暂无任务"
-    return f'<svg class="stack" viewBox="0 0 100 8" preserveAspectRatio="none" role="img" aria-label="{label}">{bars}</svg>'
+    return (f'<svg class="stack" viewBox="0 0 100 8" preserveAspectRatio="none" role="img" '
+            f'aria-label="{label}">{bars}</svg>')
 
 
 def role_chip(roles):
@@ -75,7 +77,8 @@ def project_index(actor, cards, tasks, admin):
 
 def overview_tab(project, tasks, activity):
     rows = live(tasks, project["id"])
-    legend = "".join(f'<span><i class="f-{key}"></i>{name} {sum(wb.column_of(t) == key for t in rows)}</span>' for key, name, _ in wb.COLUMNS)
+    legend = "".join(f'<span><i class="f-{key}"></i>{name} {sum(wb.column_of(t) == key for t in rows)}</span>'
+                     for key, name, _ in wb.COLUMNS)
     query = urlencode({"project": project["id"]})
     links = f'<a class="secondary" href="/board?{query}">在看板中查看</a><a class="secondary" href="/list?{query}">在列表中查看</a>'
     if {"manager", "receiver"} & set(project["roles"]):
@@ -85,7 +88,8 @@ def overview_tab(project, tasks, activity):
     for item in [row for row in activity if row["project"] == project["id"]][:8]:
         who = wb.window_text(item)
         recent += (f'<li><a class="tid" data-task-link href="/tasks/{quote(item["task_id"])}">{e(item["task_id"])}</a>'
-                   f'<b>{e(who)}</b>{e(wb.event_label(item) or "")}<span class="when">{stamp(item.get("committed_utc"))}</span></li>')
+                   f'<b>{e(who)}</b>{e(wb.event_label(item) or "")}'
+                   f'<span class="when">{stamp(item.get("committed_utc"))}</span></li>')
     return f"""<div class="ovgrid">
   <div class="box"><h3>任务进度</h3>{stack(rows)}<div class="legend">{legend}</div><div class="addrow">{links}</div></div>
   <div class="box"><h3>最近动态</h3><ul class="recent">{recent or '<li class="muted-text">暂无</li>'}</ul></div></div>"""
@@ -132,7 +136,8 @@ def online_of(item):
 
 def capability_row(row):
     verified = row["level"] == "verified"
-    return (f'<li><span>{e(row["id"])}</span><span class="badge {"ok" if verified else "dec"}">{"已核实" if verified else "已申报"}</span>'
+    return (f'<li><span>{e(row["id"])}</span>'
+            f'<span class="badge {"ok" if verified else "dec"}">{"已核实" if verified else "已申报"}</span>'
             f'<span class="basis">{e(row["evidence"]["note"])} · 到期 {stamp(row["expires"])}</span></li>')
 
 
@@ -144,14 +149,18 @@ def task_line(task):
 
 def window_card(item, tasks, manage_projects=False):
     claimed = {c["task_id"] for c in item["tasks"]}
-    mine = [tasks[tid] for tid in sorted(claimed) if tid in tasks and any(c["task_id"] == tid and c["lifecycle"] == "active" for c in item["tasks"])]
-    done = [tasks[tid] for tid in sorted(claimed) if tid in tasks and wb.column_of(tasks[tid]) == "done" and tasks[tid] not in mine]
+    mine = [tasks[tid] for tid in sorted(claimed)
+            if tid in tasks and any(c["task_id"] == tid and c["lifecycle"] == "active" for c in item["tasks"])]
+    done = [tasks[tid] for tid in sorted(claimed)
+            if tid in tasks and wb.column_of(tasks[tid]) == "done" and tasks[tid] not in mine]
     online, state = online_of(item)
     label, kind, note, at = report_of(item)
-    where = " · ".join(e(str(v)) for v in (item.get("platform"), f'责任人 {item.get("owner")}', item.get("directory")) if v)
+    where = " · ".join(e(str(v)) for v in (item.get("platform"), f'责任人 {item.get("owner")}', item.get("directory"))
+                       if v)
     joined = "；".join(f'{e(m["name"])}（{wb.tier_name(m["roles"])}）' for m in item["memberships"]) or "无"
     caps = "".join(capability_row(row) for row in item["capabilities"]) or '<li class="muted-text">尚未申报</li>'
-    project_link = (f'<a class="link-sm" href="/accounts/projects?{urlencode({"identity": item["executor_id"]})}">调整项目</a>'
+    project_link = (f'<a class="link-sm" href="/accounts/projects?{urlencode({"identity": item["executor_id"]})}">'
+                    f'调整项目</a>'
                     if manage_projects else "")
     manage_link = (f'<a class="secondary" href="/executors/{quote(item["executor_id"])}/manage">查看影响与管理窗口</a>'
                    if item.get("can_manage") else "")
@@ -175,7 +184,8 @@ def windows_page(actor, profile, sources, tasks, show_archived=False):
     if (profile["binding"] or {}).get("kind") == "human" and profile["projects"]:
         invite = '<a class="primary right" href="/invitations">邀请 AI 窗口</a>'
     binding = profile["binding"] or {}
-    manage_projects = binding.get("kind") == "human" and binding.get("status") == "active" and binding.get("admin") is True
+    manage_projects = (binding.get("kind") == "human" and binding.get("status") == "active"
+                       and binding.get("admin") is True)
     archived = sum(item["status"] == "archived" for item in sources)
     shown = [item for item in sources if show_archived or item["status"] != "archived"]
     cards = "".join(window_card(item, index, manage_projects) for item in shown)
@@ -190,8 +200,10 @@ def windows_page(actor, profile, sources, tasks, show_archived=False):
 def feed_row(item):
     who = wb.window_text(item) or "未知"
     reason = f'<span class="muted-text">：{e(item["reason"])}</span>' if item.get("reason") else ""
-    return (f'<tr><td class="tid">{stamp(item.get("committed_utc"))}</td><td>{wb.avatar(who, bool(item.get("window")))}</td>'
-            f'<td><a class="tid" data-task-link href="/tasks/{quote(item["task_id"])}">{e(item["task_id"])}</a> <span class="muted-text">{e(item["title"])}</span></td>'
+    return (f'<tr><td class="tid">{stamp(item.get("committed_utc"))}</td>'
+            f'<td>{wb.avatar(who, bool(item.get("window")))}</td>'
+            f'<td><a class="tid" data-task-link href="/tasks/{quote(item["task_id"])}">{e(item["task_id"])}</a> '
+            f'<span class="muted-text">{e(item["title"])}</span></td>'
             f'<td class="wide">{e(wb.event_label(item) or "")}{reason}</td></tr>')
 
 
@@ -227,7 +239,8 @@ def accounts_page(actor, rows, invite, code, controls):
             action = f'<a class="secondary" href="/tokens/rotate?{target}">轮换令牌</a>'
         if row["kind"] in {"human", "executor"}:
             action += f'<a class="secondary" href="/accounts/projects?{target}">调整项目</a>'
-        where = f'AI 窗口 · {e(str(row.get("platform") or ""))} · 责任人 {e(str(row.get("owner") or ""))}' if ai else "人员" if row["kind"] == "human" else "身份未确认"
+        where = (f'AI 窗口 · {e(str(row.get("platform") or ""))} · 责任人 {e(str(row.get("owner") or ""))}' if ai else "人员"
+                 if row["kind"] == "human" else "身份未确认")
         body += (f'<tr><td>{wb.window_avatar(row)}</td><td>{where}</td>'
                  f'<td>{"系统管理员" if row["admin"] else "普通成员"}</td><td class="wide muted-text">{projects}</td>'
                  f'<td><span class="{kind}">{status}</span></td><td><div class="ops">{action}</div></td></tr>')
@@ -261,7 +274,8 @@ def permissions_page(actor):
     fields = (("任务负责人", "跟进任务结果，首页「我负责跟进的」列出未完成的任务。新建任务时默认是创建人"),
               ("执行人", "领取后自动填上。可以交付、放回"),
               ("验收人", "新建任务时确定，只有项目管理员登记时能指定他人；验收人不能领取自己验收的任务"))
-    matrix = "".join(f'<tr><td class="wide">{row[0]}</td>{"".join(f"<td>{cell}</td>" for cell in row[1:])}</tr>' for row in rows)
+    matrix = "".join(f'<tr><td class="wide">{row[0]}</td>{"".join(f"<td>{cell}</td>" for cell in row[1:])}</tr>'
+                     for row in rows)
     table = "".join(f'<tr><td><b>{name}</b></td><td class="wide">{text}</td></tr>' for name, text in fields)
     return work(actor, f"""<p class="muted-text">权限分两层。系统层只有「系统管理员」和「普通成员」。项目层有四档角色，只管权限：一个账号在不同项目里可以担任不同角色。谁执行、谁验收不是角色，而是每个任务上的字段。AI 窗口最高只能是贡献者。</p>
   <div class="table-wrap"><table class="matrix"><thead><tr><th>操作</th><th>系统管理员</th><th>项目管理员</th><th>贡献者</th><th>报告者</th><th>观察者</th></tr></thead><tbody>{matrix}</tbody></table></div>
@@ -273,7 +287,8 @@ def permissions_page(actor):
 
 def self_page(actor, profile, capabilities, form, message, failed):
     binding = profile["binding"] or {}
-    joined = "".join(f'<div>{e(p["name"])} · <b>{wb.tier_name(p["roles"])}</b></div>' for p in profile["projects"]) or '<span class="muted-text">还没有加入项目</span>'
+    joined = ("".join(f'<div>{e(p["name"])} · <b>{wb.tier_name(p["roles"])}</b></div>' for p in profile["projects"])
+              or '<span class="muted-text">还没有加入项目</span>')
     kind = "AI 窗口" if binding.get("kind") == "executor" else "人员"
     caps = "".join(capability_row(row) for row in capabilities) or '<li class="muted-text">尚未申报</li>'
     note = f'<p class="{"form-error" if failed else "muted-text"}" role="status">{e(message)}</p>' if message else ""

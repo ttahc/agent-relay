@@ -10,10 +10,13 @@ SECRET_FIELDS = {'token', 'tokens', 'access_token', 'refresh_token', 'rotation_t
     'current', 'confirm', 'recovery', 'secret', 'private_key', 'verifier', 'salt', 'proof_sha', 'token_sha',
     'reset', 'reset_code', 'invitation_url', 'invite_url'}
 PATTERNS = (
-    ('private-key', re.compile(r'-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----', re.S)),
+    ('private-key', re.compile(
+        r'-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----', re.S)),
     ('bearer', re.compile(r'(?i)(\bBearer\s+)[A-Za-z0-9._~+/-]{25,}')),
     ('provider-key', re.compile(r'\b(?:ghp_|github_pat_|sk-proj-|sk-ant-)[A-Za-z0-9_-]{24,}')),
-    ('credential-assignment', re.compile(r'''(?i)((?:password|passwd|api[_-]?key|access[_-]?token|refresh[_-]?token|secret|recovery|code)\s*[=:]\s*["']?)[A-Za-z0-9_./+~=-]{24,}''')),
+    ('credential-assignment', re.compile(
+        r'''(?i)((?:password|passwd|api[_-]?key|access[_-]?token|refresh[_-]?token|secret|recovery|code)'''
+        r'''\s*[=:]\s*["']?)[A-Za-z0-9_./+~=-]{24,}''')),
     ('invitation-link', re.compile(r'(https?://[^\s"<>]+/ai/join/[^\s"<>#]+)#[^\s"<>]+')),
 )
 
@@ -35,7 +38,8 @@ def text(value, private_paths=False):
 
 def public(value, private_paths=False):
     if isinstance(value, dict):
-        return {key: ('[已隐藏]' if str(key).lower() in SECRET_FIELDS else public(item, private_paths)) for key, item in value.items()}
+        return {key: ('[已隐藏]' if str(key).lower() in SECRET_FIELDS else public(item, private_paths))
+                for key, item in value.items()}
     if isinstance(value, list):
         return [public(item, private_paths) for item in value]
     if isinstance(value, tuple):
@@ -71,7 +75,8 @@ def release_findings(files):
     provider_pattern = re.compile(rb'\b(?:ghp_|github_pat_|sk-proj-|sk-ant-)[A-Za-z0-9_-]{24,}')
     for name, raw in files.items():
         path = PurePosixPath(name)
-        if path.name.lower() in private_names or path.suffix.lower() in {'.pfx', '.p12', '.key', '.dpapi', '.sqlite3'} or '.state' in path.parts:
+        if (path.name.lower() in private_names or path.suffix.lower() in {'.pfx', '.p12', '.key', '.dpapi', '.sqlite3'}
+            or '.state' in path.parts):
             findings.append({'path': name, 'kind': 'private-file'})
         if key_pattern.search(raw):
             findings.append({'path': name, 'kind': 'private-key'})

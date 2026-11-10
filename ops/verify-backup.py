@@ -31,11 +31,13 @@ def verify(archive, tag, legacy_config=None, launch_sha=None):
     if not {"repo.json", "http-journal.sqlite3", "credentials.json"} <= normal.keys():
         raise ValueError("完整恢复点缺少账本元数据、请求日志或服务凭据")
     head = value["ledger_head"]
-    if head > len(normal) or any("ledger/" + str(index).zfill(12) + ".json" not in normal for index in range(1, head + 1)):
+    if (head > len(normal)
+        or any("ledger/" + str(index).zfill(12) + ".json" not in normal for index in range(1, head + 1))):
         raise ValueError("账本事件文件与固定 head 不完整")
     for name in normal:
         logical = PurePosixPath(name)
-        if not isinstance(name, str) or logical.is_absolute() or str(logical) != name or ".." in logical.parts or "\\" in name or ":" in name:
+        if (not isinstance(name, str) or logical.is_absolute() or str(logical) != name or ".." in logical.parts
+            or "\\" in name or ":" in name):
             raise ValueError("备份原件路径无效")
     if "tls/key.pem" not in service or not ({"tls/cert-v2.pem", "tls/cert.pem"} & service.keys()):
         raise ValueError("TLS 白名单不完整")
@@ -51,7 +53,8 @@ def verify(archive, tag, legacy_config=None, launch_sha=None):
     elif legacy_config is not None:
         legacy_config = Path(legacy_config)
         if (legacy_config.resolve() != (archive / (tag + ".launch.json")).resolve() or legacy_config.is_symlink() or
-                not legacy_config.is_file() or not isinstance(launch_sha, str) or not re.fullmatch(r"[a-f0-9]{64}", launch_sha) or
+                not legacy_config.is_file() or not isinstance(launch_sha, str) or
+                not re.fullmatch(r"[a-f0-9]{64}", launch_sha) or
                 os.name == "posix" and legacy_config.stat().st_mode & 0o077):
             raise ValueError("首次旧版备份需要同档案中已经固定的私有启动配置")
         raw = legacy_config.read_bytes()
@@ -68,7 +71,8 @@ def verify(archive, tag, legacy_config=None, launch_sha=None):
             raise ValueError("备份对象引用无效")
         obj = archive / "objects" / sha
         info = obj.lstat()
-        if not stat.S_ISREG(info.st_mode) or info.st_size != size or os.name == "posix" and stat.S_IMODE(info.st_mode) != 0o600:
+        if (not stat.S_ISREG(info.st_mode) or info.st_size != size
+            or os.name == "posix" and stat.S_IMODE(info.st_mode) != 0o600):
             raise ValueError("备份对象缺失、链接、大小或权限无效")
         with obj.open("rb") as stream:
             if hashlib.file_digest(stream, "sha256").hexdigest() != sha:

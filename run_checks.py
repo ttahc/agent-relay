@@ -73,7 +73,8 @@ def main(argv=None):
     parser.add_argument("--list", action="store_true", help="列出将运行的检查后退出")
     args = parser.parse_args(argv)
 
-    split = lambda items: [n.strip().removesuffix(".py").removesuffix(".js") for i in items for n in i.split(",") if n.strip()]
+    split = lambda items: [n.strip().removesuffix(".py").removesuffix(".js") for i in items
+                           for n in i.split(",") if n.strip()]
     available = discover()
     only, skip = split(args.only), set(split(args.skip))
     unknown = [name for name in [*only, *skip] if name not in available]

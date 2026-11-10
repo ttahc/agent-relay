@@ -55,7 +55,8 @@ def payload(state, actor, action, body, key):
             not (action == "feedback-move" and rules.system_admin(state, actor))):
         raise ClientError("观察者只能查看反馈", 403)
     if action == "decision-save":
-        fields(body, "request_id project_id id version area scope status reason benefit cost risk rollback replaces replaces_version tasks")
+        fields(body, "request_id project_id id version area scope status reason benefit cost risk rollback "
+                     "replaces replaces_version tasks")
         out.update(id=identifier(body["id"], "决定编号"), version=version(body["version"]),
                    area=string(body["area"], "事项", 160).strip(), scope=string(body["scope"], "适用范围", 500).strip(),
                    status=choice(body["status"], ("proposed", "effective", "withdrawn"), "决定状态"),
@@ -82,7 +83,8 @@ def payload(state, actor, action, body, key):
                             "criterion": string(row["criterion"], "原判据", 100),
                             "target_criterion": string(row["target_criterion"], "承接判据", 100)})
         out.update(id="chg-" + key[:20], kind=choice(body["kind"], ("split", "merge"), "变更类型"),
-                   sources=ids(body["sources"]), targets=ids(body["targets"]), mapping=mapping, versions=versions(body["versions"]))
+                   sources=ids(body["sources"]), targets=ids(body["targets"]), mapping=mapping,
+                   versions=versions(body["versions"]))
         for name in ("reason", "benefit", "cost", "risk", "rollback"):
             out[name] = string(body[name], name, 4000)
     elif action == "change-finish":
@@ -107,7 +109,8 @@ def payload(state, actor, action, body, key):
                    target_project_id=target, reason=string(body["reason"], "调整依据"))
     else:
         from 协作关系 import TRANSITIONS
-        fields(body, "request_id project_id id version status linked_task duplicate reason evidence metrics lesson limits")
+        fields(body,
+               "request_id project_id id version status linked_task duplicate reason evidence metrics lesson limits")
         out.update(id=identifier(body["id"], "反馈编号"), version=version(body["version"]),
                    status=choice(body["status"], tuple(TRANSITIONS), "处理状态"),
                    linked_task=identifier(body["linked_task"], "跟踪任务") if body["linked_task"] else "",

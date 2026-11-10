@@ -62,22 +62,26 @@ def overview(actor, data):
   <span class="status">{escape(STAGES.get(t['stage'], t['stage']))}</span>
 </a></li>""" for t in rows)
         listing = f'<ul class="task-list">{links}</ul>' if links else '<p class="muted">暂无任务。</p>'
-        sections.append(f'<section class="overview-group"><h2>{title} <span class="count">{len(rows)}</span></h2>{listing}</section>')
+        sections.append(f'<section class="overview-group"><h2>{title} <span class="count">{len(rows)}</span></h2>'
+                        f'{listing}</section>')
     role = data["roles"]
     new = '<a class="primary" href="/tasks/new">登记任务</a>' if {"receiver", "admin"} & set(role) else ""
     accounts = '<a class="secondary" href="/accounts">账号管理</a>' if "admin" in role else ""
     navigation = ('<nav class="buttons"><a class="secondary" href="/projects">项目</a>'
                   '<a class="secondary" href="/executors">窗口目录</a><a class="secondary" href="/capabilities">能力与证据</a>'
-                  '<a class="secondary" href="/audit">状态追溯</a><a class="secondary" href="/upgrade">升级验收</a></nav>') if data.get("upgraded") else ""
+                  '<a class="secondary" href="/audit">状态追溯</a>'
+                  '<a class="secondary" href="/upgrade">升级验收</a></nav>') if data.get("upgraded") else ""
     if data.get("round"):
         from .upgrade_pages import input_field, selection
         options = [("", "全部项目")] + [(p["id"], p["name"]) for p in data["projects"]]
         navigation += ('<nav class="buttons round-nav" aria-label="我的工作"><a class="secondary" href="/?mine=1">待我处理</a>'
                        '<a class="secondary" href="/?matching=1">符合领取条件</a>'
-                       '<a class="secondary" href="/collaboration">反馈与决定</a><a class="secondary" href="/password">账号密码</a></nav>')
+                       '<a class="secondary" href="/collaboration">反馈与决定</a>'
+                       '<a class="secondary" href="/password">账号密码</a></nav>')
         navigation += ('<form class="operation filter-grid" method="get" action="/">'
                        + selection("project", "项目", options, filters.get("project", "")).replace(" required", "")
-                       + selection("stage", "状态", [("", "全部状态"), *STAGES.items()], filters.get("stage", "")).replace(" required", "")
+                       + selection("stage", "状态", [("", "全部状态"), *STAGES.items()],
+                                   filters.get("stage", "")).replace(" required", "")
                        + input_field("window", "窗口名称或编号", filters.get("window", ""), required=False, size=200)
                        + '<button class="secondary" type="submit">筛选任务</button></form>')
     return workspace(actor, f"""<section class="task-panel">
@@ -233,15 +237,18 @@ def execution_runtime(view):
     if view.get("execution_protocol") != 5:
         return ""
     status = view.get("execution_status") or {}
-    status = {**status, "start-authorized": status.get("start-authorized", status.get("start_authorized", status.get("awaiting_start", 0)))}
+    status = {**status, "start-authorized": status.get(
+        "start-authorized", status.get("start_authorized", status.get("awaiting_start", 0)))}
     actions = status.get("actions", [])
-    count = status.get("count", len(actions) if isinstance(actions, list) else actions if isinstance(actions, int) else 0)
+    count = status.get("count", len(actions) if isinstance(actions, list) else actions
+                       if isinstance(actions, int) else 0)
     labels = (("running", "实际执行中"), ("start-authorized", "许可已发，实际开工待回报"),
               ("unconfirmed", "执行事实待确认"), ("unknown", "物理占用待确认"), ("finished", "已登记结束事实"),
               ("stopped", "已回报停止"), ("error", "已回报错误"), ("not-started", "已确认未启动"),
               ("prepared", "已准备"), ("queued", "资源排队中"), ("granted", "资源已授予"))
     facts = "；".join(f'{label} {number}' for key, label in labels
-                     if isinstance((number := status.get(key, status.get(key.replace("-", "_"), 0))), int) and number > 0)
+                     if isinstance((number := status.get(key, status.get(key.replace("-", "_"), 0))), int)
+                     and number > 0)
     text = f'本回合动作 {count} 项；{facts}' if facts else f'本回合动作 {count} 项，尚无本回合的实际开工回报；旧执行事实单独保留。'
     historical = (("historical_live", "历史未收口动作"), ("historical_unconfirmed", "历史占用待确认"))
     old = "；".join(f'{label} {number}' for key, label in historical
@@ -258,7 +265,8 @@ def detail(actor, view):
     inputs = file_list("冻结输入", [{"path": path, "sha256": sha} for path, sha in task["inputs"].items()])
     handoffs = file_list("接续材料", view["handoffs"])
     criteria = "".join(f"<li>{escape(item)}</li>" for item in task["completes_on"])
-    actions = worker_actions(actor, task, claim, view.get("qualification"), view.get("execution_protocol")) if "executor" in view["roles"] else ""
+    actions = (worker_actions(actor, task, claim, view.get("qualification"), view.get("execution_protocol"))
+               if "executor" in view["roles"] else "")
     actions += receiver_actions(actor, task, claim, view["deliveries"], bool({"admin", "manager"} & set(view["roles"])))
     controls = f'<section class="detail-group"><h2>当前可办操作</h2>{actions}</section>' if actions else ""
     revisions = []
@@ -282,7 +290,8 @@ def detail(actor, view):
         run = claim["run"]
         labels = {"claimed": "已领取，执行回报待确认", "intent": "开工请求已登记", "started": "已回报开始", "waiting": "等待输入",
                   "working": "继续执行", "finished": "执行回报结束", "error": "执行异常"}
-        runtime = f'<p role="status">当前代次 {claim["epoch"]} · {labels[run["state"]]} {escape(run.get("evidence", ""))}</p>'
+        runtime = (f'<p role="status">当前代次 {claim["epoch"]} · {labels[run["state"]]} '
+                   f'{escape(run.get("evidence", ""))}</p>')
     return workspace(actor, f"""<article class="task-panel">
   <div class="section-title">
     <div><span class="task-id">{escape(task['task_id'])}</span><h1>{escape(task['title'])}</h1>{project_label(task)}</div>

@@ -18,8 +18,8 @@ import 协作升级 as rules
 
 PATHS = {"/password", "/password/setup", "/password/reset", "/accounts/reset", "/accounts/projects", "/invitations",
          "/assistants",
-         "/tokens/rotate", "/permissions", "/assets/round.js", "/assets/workbench.js", "/assets/workbench.css", "/collaboration",
-         "/release-status", "/workspace-state"}
+         "/tokens/rotate", "/permissions", "/assets/round.js", "/assets/workbench.js", "/assets/workbench.css",
+         "/collaboration", "/release-status", "/workspace-state"}
 WORKBENCH_JS = Path(__file__).with_name("workbench.js").read_bytes()
 WORKBENCH_CSS = Path(__file__).with_name("workbench.css").read_bytes()
 POST_FORM = re.compile(rb"(<form\b[^>]*\bmethod=[\"']post[\"'][^>]*>)", re.IGNORECASE)
@@ -69,7 +69,8 @@ def csrf_context(handler, method):
             value = secrets.token_urlsafe(32) if method == "GET" else ""
             if value:
                 secure = "; Secure" if handler.server.tls else ""
-                headers = (("Set-Cookie", f"{form_cookie(handler)}={value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=3600{secure}"),)
+                headers = (("Set-Cookie", f"{form_cookie(handler)}={value}; Path=/; HttpOnly; SameSite=Strict; "
+                                          f"Max-Age=3600{secure}"),)
         nonce = "form:" + value if value else ""
     handler.form_token = hmac.digest(handler.server.csrf_key, nonce.encode(), "sha256").hex() if nonce else None
     return headers
@@ -134,7 +135,8 @@ def page(title, message="", status=200, body="", actor=None):
     text = f'<p class="intro" role="status">{escape(message)}</p>' if message else ""
     main = f'<section class="task-panel"><h1>{escape(title)}</h1>{text}{body}</section>'
     return html_page(escape(title) + " · 内网任务服务",
-                     task_pages.workspace(actor, main) if actor else f'<main class="workspace narrow">{main}</main>', status)
+                     task_pages.workspace(actor, main) if actor else f'<main class="workspace narrow">{main}</main>',
+                     status)
 
 
 def work_page(title, body, actor, status=200):
@@ -169,7 +171,8 @@ def login(identity="", message="", status=200):
     from .web import html_page
     from . import __version__, RELEASE_NAME
     feedback = f'<p class="form-error" role="alert">{escape(message)}</p>' if message else ""
-    form = password_form("/login", identity_input(value=identity) + password_input("password", "密码", "current-password"), "登录")
+    form = password_form("/login",
+                         identity_input(value=identity) + password_input("password", "密码", "current-password"), "登录")
     return html_page("登录 · 内网任务服务", f"""
 <main class="login-shell">
   <section class="brand" aria-label="内网任务服务">
@@ -212,7 +215,8 @@ def password_fields(kind, identity):
         fields += password_input("token", "原账号访问令牌", "off")
     else:
         fields += password_input("reset", "管理员提供的重置凭据", "off")
-    return fields + password_input("password", "新密码", "new-password") + password_input("confirm", "确认新密码", "new-password")
+    return (fields + password_input("password", "新密码", "new-password")
+            + password_input("confirm", "确认新密码", "new-password"))
 
 
 def password_route(handler, method, path, current, actor):
@@ -232,7 +236,8 @@ def password_route(handler, method, path, current, actor):
             return login(name[:80], str(error), error.status)
         with service.lock:
             subject = rules.identity(service.snapshot()["state"], valid[0]) if valid else None
-            if subject and subject["kind"] == "human" and subject["status"] == "active" and service.passwords.version(valid[0]) == valid[1]:
+            if (subject and subject["kind"] == "human" and subject["status"] == "active"
+                and service.passwords.version(valid[0]) == valid[1]):
                 issued = server.sessions.create(valid[0], current, service.session_version(valid[0]))
                 from .web import SESSION_AGE
                 return redirect("/", session_cookie(handler, issued, SESSION_AGE))
@@ -248,13 +253,15 @@ def password_route(handler, method, path, current, actor):
         from .packages import fields
         try:
             data = parse_form(handler, 8192, 5)
-            identity_fields = {"signup": "identity invitation", "setup": "identity token", "reset": "identity reset", "change": "current"}[kind]
+            identity_fields = {"signup": "identity invitation", "setup": "identity token", "reset": "identity reset",
+                               "change": "current"}[kind]
             fields(data, "request_id password confirm " + identity_fields)
             name = actor if kind == "change" else data["identity"].strip()
             if data["password"] != data["confirm"]:
                 raise ClientError("两次输入不一致")
             if kind == "signup":
-                status, result = round_service.password_signup(service, data["request_id"], name, data["invitation"].strip(), data["password"])
+                status, result = round_service.password_signup(service, data["request_id"], name,
+                                                               data["invitation"].strip(), data["password"])
             else:
                 authenticated = service.passwords.authenticate(name, data["current"]) if kind == "change" else None
                 if kind == "change" and not authenticated:
@@ -270,13 +277,15 @@ def password_route(handler, method, path, current, actor):
                     subject = rules.identity(state, name) or {}
                     if subject.get("kind") != "human" or subject.get("status") != "active":
                         raise ClientError("无法确认该人员账号", 403)
-                    if kind == "setup" and (service.passwords.version(name) or not server.actor_for_token(data["token"].strip(), name)):
+                    if kind == "setup" and (service.passwords.version(name)
+                                            or not server.actor_for_token(data["token"].strip(), name)):
                         raise ClientError("原账号或凭据无效，已设置密码时请直接登录", 403)
                     if kind == "change" and (not authenticated or authenticated[1] != service.passwords.version(name) or
                                              server.sessions.actor(current, service) != name):
                         raise ClientError("当前密码或登录状态无效", 403)
                     proof = service.passwords.check_reset(name, data["reset"].strip()) if kind == "reset" else None
-                    status, result = round_service.password_change(service, name, name, kind, data["request_id"], protected, proof)
+                    status, result = round_service.password_change(service, name, name, kind, data["request_id"],
+                                                                   protected, proof)
             if status == 200:
                 handler.web_operation_completed = True
                 server.sessions.end(current)
@@ -308,7 +317,8 @@ def reset_issue(handler, method, actor, target):
         if method == "GET":
             from .httpd import parse_query
             name = parse_query(target.query, {"identity"}).get("identity", "")
-            return page("人员密码恢复", "核对人员身份后签发 15 分钟有效的重置凭据。", body=password_form("/accounts/reset", identity_input(value=name), "生成重置凭据"), actor=actor)
+            return page("人员密码恢复", "核对人员身份后签发 15 分钟有效的重置凭据。",
+                        body=password_form("/accounts/reset", identity_input(value=name), "生成重置凭据"), actor=actor)
         fields(data, "request_id identity")
         name = identifier(data["identity"], "人员账号")
         status, value = service.submit(actor, "password-event", data["request_id"],
@@ -316,9 +326,12 @@ def reset_issue(handler, method, actor, target):
                                        authorize=lambda: current_actor(handler))
         handler.web_action_result = value
         if status != 200:
-            return page("人员密码恢复", value.get("message") or (value.get("steps") or [{}])[-1].get("reason", "请求待确认"), status, actor=actor)
+            return page("人员密码恢复", value.get("message") or (value.get("steps") or [{}])[-1].get("reason", "请求待确认"),
+                        status, actor=actor)
         code = service.passwords.reset_reply(digest(encoded([actor, data["request_id"]])), name)
-        return page("人员密码恢复", "请将重置凭据交给已核对的人员。", body=f'<code class="credential">{escape(code)}</code><p><a href="/password/reset">重置入口</a></p>', actor=actor)
+        return page("人员密码恢复", "请将重置凭据交给已核对的人员。",
+                    body=f'<code class="credential">{escape(code)}</code><p><a href="/password/reset">重置入口</a></p>',
+                    actor=actor)
 
 
 def invitations(handler, method, actor, target=None):
@@ -337,7 +350,8 @@ def invitations(handler, method, actor, target=None):
         return ('<h2>复制邀请链接</h2><p>把这一条完整链接交给对应 AI 窗口，接入说明和客户端可在链接中取得。</p>'
                 f'<textarea rows="3" readonly aria-label="AI 邀请链接">{escape(link)}</textarea>'
                 '<details><summary>高级：旧客户端兼容资料</summary>'
-                f'<textarea rows="8" readonly aria-label="AI 接入信息">{escape(json.dumps(bundle, indent=2, ensure_ascii=False))}</textarea></details>')
+                f'<textarea rows="8" readonly aria-label="AI 接入信息">'
+                f'{escape(json.dumps(bundle, indent=2, ensure_ascii=False))}</textarea></details>')
     if method == "POST":
         data = parse_form(handler, 4096, 9)
         op = data.pop("operation", "")
@@ -353,19 +367,22 @@ def invitations(handler, method, actor, target=None):
                                                    authorize=lambda: current_actor(handler))
                     handler.web_action_result = value
                 except (ValueError, ClientError) as error:
-                    status, value = getattr(error, "status", 400), {"message": str(error) if isinstance(error, ClientError) else "有效时间和登记额度须为整数"}
+                    status, value = (getattr(error, "status", 400),
+                                     {"message": str(error) if isinstance(error, ClientError) else "有效时间和登记额度须为整数"})
                 if status == 200 and value.get("invitation"):
                     record = handler.invitation_bundle(value["invitation"])
                     issued = present(record)
             elif op == "link":
                 fields(data, "request_id invite_id")
-                row = next((row for row in service.read(actor, "invitations")["invitations"] if row["id"] == data["invite_id"]), None)
+                row = next((row for row in service.read(actor, "invitations")["invitations"]
+                            if row["id"] == data["invite_id"]), None)
                 if not row:
                     raise ClientError("邀请不存在或当前人员无权查看", 404)
                 if (row["expires"] <= time.time() or row["used"] >= row["count"] or
                         not round_service.usable_invite(service.snapshot()["state"], row)):
                     raise ClientError("邀请已失效或额度不足，请重新生成", 409)
-                record = handler.invitation_bundle({**row, "code": service.accounts.token("ai-invite", row["id"], row["issuer"])})
+                record = handler.invitation_bundle(
+                    {**row, "code": service.accounts.token("ai-invite", row["id"], row["issuer"])})
                 issued = present(record)
                 status = 200
             elif op == "revoke":
@@ -395,31 +412,44 @@ def invitations(handler, method, actor, target=None):
                           + upgrade_pages.selection("project", "项目", upgrade_pages.project_options(own), selected)
                           + '<noscript><button class="secondary" type="submit">切换项目</button></noscript></form>')
         defaults = {"owner": actor, "roles": "executor", "hours": "24", "count": "1", **attempted}
-        count = upgrade_pages.input_field("count", "可登记窗口数", defaults["count"]).replace('<input ', '<input type="number" min="1" max="20" step="1" ')
+        count = upgrade_pages.input_field("count", "可登记窗口数", defaults["count"]).replace(
+            '<input ', '<input type="number" min="1" max="20" step="1" ')
         editor = password_form("/invitations", task_pages.hidden("operation", "issue")
                                + task_pages.hidden("project_id", selected)
                                + upgrade_pages.identity_picker("owner", "责任人（窗口归属人员）", owners, defaults["owner"])
-                               + upgrade_pages.selection("roles", "窗口项目权限", [("executor,receiver", "贡献者"), ("executor", "仅任务执行权限"), ("receiver", "仅任务验收权限")], defaults["roles"])
-                               + upgrade_pages.selection("hours", "邀请有效期", [("1", "1 小时"), ("4", "4 小时"), ("8", "8 小时"), ("24", "1 天"), ("72", "3 天"), ("168", "7 天")], defaults["hours"])
+                               + upgrade_pages.selection("roles", "窗口项目权限",
+                                                         [("executor,receiver", "贡献者"), ("executor", "仅任务执行权限"),
+                                                          ("receiver", "仅任务验收权限")], defaults["roles"])
+                               + upgrade_pages.selection("hours", "邀请有效期",
+                                                         [("1", "1 小时"), ("4", "4 小时"), ("8", "8 小时"), ("24", "1 天"),
+                                                          ("72", "3 天"), ("168", "7 天")], defaults["hours"])
                                + count, "生成 AI 邀请")
         editor = choose_project + editor
     items = []
     for row in service.read(actor, "invitations")["invitations"]:
         name = escape(row["id"])
         used = f'{row["used"]} / {row["count"]}'
-        stage = "已撤销" if row["revoked"] else "已到期" if row["expires"] <= time.time() else "额度已用完" if row["used"] >= row["count"] else "可用"
+        stage = ("已撤销" if row["revoked"] else "已到期" if row["expires"] <= time.time() else "额度已用完"
+                 if row["used"] >= row["count"] else "可用")
         format_note = "链接邀请" if invite_links.is_current(service, row["id"]) else "旧格式邀请：可生成新版接入链接，已登记窗口继续使用原凭据"
-        windows = "".join(f'<li><a href="/executors/{quote(w["name"])}">{escape(w["window"])}</a> · {escape(workbench_pages.STATUS.get(w["state"], ("待核实", ""))[0])}</li>'
-                          for w in row["windows"])
+        windows = "".join(
+            f'<li><a href="/executors/{quote(w["name"])}">{escape(w["window"])}</a> · '
+            f'{escape(workbench_pages.STATUS.get(w["state"], ("待核实", ""))[0])}</li>'
+            for w in row["windows"])
         controls = "" if row["revoked"] else password_form("/invitations", task_pages.hidden("operation", "revoke") +
                     task_pages.hidden("invite_id", row["id"]) + upgrade_pages.input_field("reason", "撤销依据"), "撤销邀请")
         if stage == "可用":
-            controls = password_form("/invitations", task_pages.hidden("operation", "link") + task_pages.hidden("invite_id", row["id"]), "生成接入链接") + controls
-        items.append(f'<li><strong>{name}</strong> · {escape(row["project"])} · {escape(row["owner"])} · {used} · {stage}'
-                     f'<p class="muted-text">{format_note}</p>'
-                     f'<ul>{windows}</ul><details><summary>邀请操作</summary>{controls}</details></li>')
+            controls = password_form(
+                "/invitations", task_pages.hidden("operation", "link") + task_pages.hidden("invite_id", row["id"]),
+                "生成接入链接") + controls
+        items.append(
+            f'<li><strong>{name}</strong> · {escape(row["project"])} · {escape(row["owner"])} · {used} · {stage}'
+            f'<p class="muted-text">{format_note}</p>'
+            f'<ul>{windows}</ul><details><summary>邀请操作</summary>{controls}</details></li>')
     notice = f'<p class="form-error" role="status">{escape(message)}；已保留邀请表单，可修正后重试。</p>' if message else ""
-    return work_page("邀请窗口", notice + issued + editor + '<h2>邀请记录</h2><ul class="roster">' + "".join(items) + "</ul>", actor, status)
+    return work_page("邀请窗口",
+                     notice + issued + editor + '<h2>邀请记录</h2><ul class="roster">' + "".join(items) + "</ul>",
+                     actor, status)
 
 
 def token_rotation(handler, method, actor, target):
@@ -435,7 +465,9 @@ def token_rotation(handler, method, actor, target):
             if not round_service.rotation_allowed(state, actor, name):
                 raise ClientError("无凭据轮换权限", 403)
             version = rules.identity(state, name)["credential"]
-        return page("轮换窗口令牌", "新令牌激活后，原令牌失效。窗口编号保留。", body=password_form("/tokens/rotate", task_pages.hidden("name", name) + task_pages.hidden("version", version)
+        return page("轮换窗口令牌", "新令牌激活后，原令牌失效。窗口编号保留。",
+                    body=password_form("/tokens/rotate",
+                                       task_pages.hidden("name", name) + task_pages.hidden("version", version)
                                   + task_pages.hidden("recovery", secrets.token_urlsafe(32)) +
                                   upgrade_pages.input_field("reason", "轮换依据"), "签发待激活令牌"), actor=actor)
     data = parse_form(handler, 8192, 5)
@@ -448,9 +480,13 @@ def token_rotation(handler, method, actor, target):
         reauthenticate(handler, actor)
         status, value = round_service.prepare_token(service, actor, data)
     if status != 200 or "token" not in value:
-        return page("轮换窗口令牌", value.get("message") or (value.get("steps") or [{}])[-1].get("reason", "无可领取的新令牌"), status, actor=actor)
-    bundle = handler.invitation_bundle({k: value[k] for k in ("registration_id", "executor_id", "window", "token", "deadline")})
-    return page("待激活令牌", "将信息交给对应窗口，用 round-client.py activate 激活。", body=f'<textarea readonly rows="8" aria-label="待激活令牌">{escape(json.dumps(bundle, indent=2))}</textarea>', actor=actor)
+        return page("轮换窗口令牌", value.get("message") or (value.get("steps") or [{}])[-1].get("reason", "无可领取的新令牌"),
+                    status, actor=actor)
+    bundle = handler.invitation_bundle({k: value[k]
+                                        for k in ("registration_id", "executor_id", "window", "token", "deadline")})
+    return page("待激活令牌", "将信息交给对应窗口，用 round-client.py activate 激活。",
+                body='<textarea readonly rows="8" aria-label="待激活令牌">'
+                     f'{escape(json.dumps(bundle, indent=2))}</textarea>', actor=actor)
 
 
 def route(handler, method, target, current, actor):
@@ -472,7 +508,8 @@ def route(handler, method, target, current, actor):
         from . import __version__
         project = parse_query(target.query, {'project'}).get('project') or None
         data = handler.server.service.read(actor, 'overview', project)
-        return 200, {'revision': workbench.workspace_revision(data), 'version': __version__}, 'application/json; charset=utf-8'
+        return (200, {'revision': workbench.workspace_revision(data), 'version': __version__},
+                'application/json; charset=utf-8')
     if path == '/release-status':
         from .release_pages import page as release_page
         if method != 'GET':

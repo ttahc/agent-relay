@@ -122,7 +122,8 @@ def claim(service, actor, action, body, state):
         if security_schema(state) >= 5 and body.get('context_id'):
             if 'context_version' not in body:
                 raise ClientError('指定配置时须同时提供配置版本')
-            selected = context_record(state, actor, {'context_id': body['context_id'], 'version': body['context_version']})
+            selected = context_record(state, actor,
+                                      {'context_id': body['context_id'], 'version': body['context_version']})
         missing, _ = rules.eligible(state, state["tasks"][task_id], actor, time.time(), execution_context=selected)
         if missing:
             raise ClientError("；".join(missing), 409)
@@ -151,7 +152,8 @@ def close(service, actor, body, state, generation):
 def cancel(service, actor, body, state, generation, admin_action):
     fields(body, "request_id task_id version reason")
     task_id = string(body["task_id"], "task_id", 16)
-    project_manager = round_service.enabled(state) and rules.manager(state, rules.task_project(state["tasks"].get(task_id)), actor)
+    project_manager = (round_service.enabled(state)
+                       and rules.manager(state, rules.task_project(state["tasks"].get(task_id)), actor))
     if not admin_action and not project_manager:
         service.receiver(state, task_id, actor)
     elif task_id not in state["tasks"]:
@@ -192,7 +194,8 @@ def claim_action(service, actor, action, key, body, state, generation):
         instruction = service.review(actor, body, held, state, action)
         steps = [instruction]
         # With the holder's stop already on record, acceptance can finish the task in one request.
-        if action == "review" and body.get("finish") is True and not held["R"] and held["E"] == {"state": "stopped", "reason": "complete"}:
+        if (action == "review" and body.get("finish") is True and not held["R"]
+            and held["E"] == {"state": "stopped", "reason": "complete"}):
             steps.append(step(COORDINATOR, "close", {"task_id": task_id}, generation))
         return {"task_id": task_id, "claim_id": cid, "steps": steps}
     if held["origin"] != actor:
@@ -240,7 +243,8 @@ def resume(actor, body, state, held, scope, generation, expects):
         if held["scope_ack_pending"]:
             instructions.append(step(actor, "ack_scope", {"claim_id": cid}, expects))
         instructions.append(step(COORDINATOR, "resume",
-                                 {"claim_id": cid, "authority_ref": "bootstrap", "baseline": task["inputs"], **extra_resume},
+                                 {"claim_id": cid, "authority_ref": "bootstrap", "baseline": task["inputs"],
+                                  **extra_resume},
                                  {**generation, **expects}))
         return instructions
     if held["W"]["state"] != "revision" or held["E"] != {"state": "stopped", "reason": "complete"}:
@@ -256,7 +260,8 @@ def withdraw(actor, body, state, held, expects):
         raise ClientError("撤回交付需要当前项目执行权限", 403)
     if not rules.contract(task) or held["W"]["state"] != "review":
         raise ClientError("须有本项目的待验封存修订", 409)
-    return [step(actor, "withdraw_delivery", {"claim_id": held["claim_id"], "revision": string(body["revision"], "revision", 32),
+    return [step(actor, "withdraw_delivery",
+                 {"claim_id": held["claim_id"], "revision": string(body["revision"], "revision", 32),
                                                "reason": string(body["reason"], "撤回依据")}, expects)]
 
 
@@ -371,8 +376,8 @@ def review(service, actor, body, held, state, action):
         criterion = string(body["criterion"], "完成判据", 100)
         reason = string(body["reason"], "返修要求")
         picked = body.get("criteria", [criterion])
-        if (not isinstance(picked, list) or not picked or len(set(map(str, picked))) != len(picked) or criterion not in picked or
-                any(item not in sealed["criteria"] for item in picked)):
+        if (not isinstance(picked, list) or not picked or len(set(map(str, picked))) != len(picked) or
+                criterion not in picked or any(item not in sealed["criteria"] for item in picked)):
             raise ClientError("须选择该修订的完成判据")
         payload.update(verdict="revision", reason=reason, checks=[
             {"id": item, "status": "failed", "level": "static", "evidence": {"note": reason}} for item in picked

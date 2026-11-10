@@ -18,7 +18,8 @@ FAST = ("build", "verify_privacy", "verify_feedback_move", "verify_account_proje
         "verify_v030_ux", "verify_v030_windows", "verify_v030_continuity", "verify_v030_identity",
         "verify_v030_review_read", "verify_v030_badges_history", "verify_release_runner",
         "verify_v030_credential_recovery", "verify_v030_input_packages", "verify_v030_r2_safety",
-        "verify_r2_execution", "verify_r2_resume_segments", "verify_v030_resume_ui", "verify_v030_r2_client", "verify_v030_r2_ui", "verify_v030_execution_projection_ui", "verify_v030_review_mode_ui",
+        "verify_r2_execution", "verify_r2_resume_segments", "verify_v030_resume_ui", "verify_v030_r2_client",
+        "verify_v030_r2_ui", "verify_v030_execution_projection_ui", "verify_v030_review_mode_ui",
         "verify_v030_ux_readiness", "verify_v030_workspace_refresh", "verify_v030_post_recovery",
         "verify_v042_fixes", "verify_v042_wait")
 RELEASE = ("build", "verify", "verify_upgrade", "verify_round") + FAST[1:]
@@ -44,7 +45,8 @@ def write_json(path, value):
 
 def source_files(root):
     """Only source, bundled documentation and test helpers; no local stores or output."""
-    paths = [root / name for name in (".gitignore", "README.md", "LICENSE", "build.py", "taskpool.py", "Containerfile") if (root / name).exists()]
+    paths = [root / name for name in (".gitignore", "README.md", "LICENSE", "build.py", "taskpool.py", "Containerfile")
+             if (root / name).exists()]
     paths += list(root.glob("verify*.py")) + list(root.glob("verify*.js"))
     for folder, suffixes in SOURCE_SUFFIXES.items():
         paths += [path for path in (root / folder).rglob("*") if path.suffix.lower() in suffixes]
@@ -56,7 +58,8 @@ def source_files(root):
             continue
         if not path.exists():
             continue
-        if path.is_symlink() or any(parent.is_symlink() for parent in path.parents if parent != root and root in parent.parents):
+        if (path.is_symlink()
+            or any(parent.is_symlink() for parent in path.parents if parent != root and root in parent.parents)):
             raise ValueError(f"候选源码不能通过符号链接取文件：{relative}")
         if path.is_file():
             result[relative.as_posix()] = path.read_bytes()
@@ -71,7 +74,8 @@ def source_metadata(files):
     fingerprint = sha(json.dumps(hashes, sort_keys=True, separators=(",", ":")).encode("utf-8"))
     version = "unknown"
     for node in ast.parse(files["pool/__init__.py"].decode("utf-8-sig")).body:
-        if isinstance(node, ast.Assign) and any(isinstance(target, ast.Name) and target.id == "__version__" for target in node.targets):
+        if (isinstance(node, ast.Assign)
+            and any(isinstance(target, ast.Name) and target.id == "__version__" for target in node.targets)):
             value = ast.literal_eval(node.value)
             if isinstance(value, str):
                 version = value
@@ -162,7 +166,8 @@ def run(root, output=None, suite="fast", only=None, resume=False):
     tests = selected_tests(suite, only)
     files = source_files(root)
     metadata = source_metadata(files)
-    runtime = {"platform": sys.platform, "python": sys.version.split()[0], "executable": str(Path(sys.executable).resolve())}
+    runtime = {"platform": sys.platform, "python": sys.version.split()[0],
+               "executable": str(Path(sys.executable).resolve())}
     output = Path(output).resolve() if output else default_output(root)
     check_output(root, output)
     manifest_path = output / "manifest.json"
@@ -178,7 +183,8 @@ def run(root, output=None, suite="fast", only=None, resume=False):
         if output.exists() and any(output.iterdir()):
             raise ValueError("输出目录非空；继续原验证请使用 --resume，否则请选择新目录")
         output.mkdir(parents=True, exist_ok=True)
-        manifest = {"schema": 1, "created_utc": utc(), "source": metadata, "runtime": runtime, "attempts": [], "results": {}}
+        manifest = {"schema": 1, "created_utc": utc(), "source": metadata, "runtime": runtime,
+                    "attempts": [], "results": {}}
     attempt = "attempt-" + uuid.uuid4().hex[:12]
     attempt_root = output / attempt
     candidate = attempt_root / "source"
@@ -209,7 +215,8 @@ def run(root, output=None, suite="fast", only=None, resume=False):
             continue
         if name in REPORTS and manifest["results"].get("build", {}).get("status") != "passed":
             failed = True
-            manifest["results"][name] = {"status": "blocked", "reason": "build failed", "source_sha256": metadata["sha256"]}
+            manifest["results"][name] = {"status": "blocked", "reason": "build failed",
+                                         "source_sha256": metadata["sha256"]}
             write_json(manifest_path, manifest)
             continue
         logs = attempt_root / "logs"
@@ -218,17 +225,21 @@ def run(root, output=None, suite="fast", only=None, resume=False):
         reports.mkdir(exist_ok=True)
         stdout_path, stderr_path = logs / (name + ".stdout.log"), logs / (name + ".stderr.log")
         record = {"status": "running", "started_utc": utc(), "source_sha256": metadata["sha256"],
-                  "stdout": stdout_path.relative_to(output).as_posix(), "stderr": stderr_path.relative_to(output).as_posix()}
+                  "stdout": stdout_path.relative_to(output).as_posix(),
+                  "stderr": stderr_path.relative_to(output).as_posix()}
         if prior:
-            record["previous_attempts"] = prior.get("previous_attempts", []) + [{key: value for key, value in prior.items() if key != "previous_attempts"}]
+            record["previous_attempts"] = prior.get("previous_attempts", []) + [
+                {key: value for key, value in prior.items() if key != "previous_attempts"}]
         manifest["results"][name] = record
         attempt_record["executed"].append(name)
         write_json(manifest_path, manifest)
         command = command_for(name, candidate, reports / (name + ".json"))
-        environment = dict(os.environ, PYTHONDONTWRITEBYTECODE="1", PYTHONUTF8="1", TASKPOOL_VERIFICATION_OUTPUT=str(attempt_root))
+        environment = dict(os.environ, PYTHONDONTWRITEBYTECODE="1", PYTHONUTF8="1",
+                           TASKPOOL_VERIFICATION_OUTPUT=str(attempt_root))
         try:
             with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
-                code = subprocess.run(command, cwd=candidate, env=environment, stdout=stdout, stderr=stderr, check=False).returncode
+                code = subprocess.run(command, cwd=candidate, env=environment, stdout=stdout, stderr=stderr,
+                                      check=False).returncode
         except OSError as error:
             stderr_path.write_text(str(error) + "\n", encoding="utf-8")
             code = 127

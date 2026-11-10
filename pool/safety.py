@@ -29,7 +29,8 @@ def record_configuration(service, config):
 
 
 def initialize(db):
-    db.execute('CREATE TABLE IF NOT EXISTS request_quarantine(key TEXT PRIMARY KEY,reason TEXT NOT NULL,created REAL NOT NULL)')
+    db.execute('CREATE TABLE IF NOT EXISTS request_quarantine('
+               'key TEXT PRIMARY KEY,reason TEXT NOT NULL,created REAL NOT NULL)')
     db.commit()
 
 
@@ -51,7 +52,8 @@ def migrate(service, target, request_id):
         for key, raw_plan in service.db.execute('SELECT key,plan FROM requests WHERE status IS NULL').fetchall():
             plan = json.loads(raw_plan)
             terminal = snap['control']['terminal']
-            rows = service.db.execute('SELECT envelope FROM steps WHERE request_key=? ORDER BY position', (key,)).fetchall()
+            rows = service.db.execute('SELECT envelope FROM steps WHERE request_key=? ORDER BY position',
+                                      (key,)).fetchall()
             all_committed = len(rows) == len(plan['steps']) and all(
                 (e := json.loads(raw[0])) and (entry := terminal.get(e['origin_id'] + '/' + e['event_id'])) and
                 entry.get('result') == 'applied' and entry.get('content_sha256') == digest(encoded(e)) for raw in rows)
@@ -72,5 +74,6 @@ def migrate(service, target, request_id):
             service.accounts.baseline_executors(service.snapshot())
         state = service.snapshot()['state']
         return 200, {'status': 'applied', 'security_schema': check(state),
-                     'quarantined_requests': service.db.execute('SELECT count(*) FROM request_quarantine').fetchone()[0],
+                     'quarantined_requests': service.db.execute(
+                         'SELECT count(*) FROM request_quarantine').fetchone()[0],
                      'claims_preserved': len(state['claims']), 'head': service.snapshot()['head']}

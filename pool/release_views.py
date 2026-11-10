@@ -14,7 +14,8 @@ def identities(state, actor):
                 visible.add(name)
     rows = []
     for key, subject in state['pilot'].items():
-        if not key.startswith('identity:') or subject.get('kind') not in {'human', 'executor'} or subject.get('status') != 'active':
+        if (not key.startswith('identity:') or subject.get('kind') not in {'human', 'executor'}
+            or subject.get('status') != 'active'):
             continue
         name = key.partition(':')[2]
         if not (admin or name in visible or subject.get('owner') == actor):
@@ -38,7 +39,8 @@ def readiness(state, actor):
     from .round_projects import view
     from .task_state import stage, active_claim
     visible = [t for t in state['tasks'].values() if rules.visible(state, t, actor)]
-    waiting = [{'id': t['task_id'], 'title': t['title'], 'status': stage(t, active_claim(state, t), state)} for t in visible
+    waiting = [{'id': t['task_id'], 'title': t['title'], 'status': stage(t, active_claim(state, t), state)}
+               for t in visible
              if t['title'].startswith(('AI 接入修复', 'v0.')) and t['status'] not in {'completed', 'cancelled'}]
     feedback = view(state, actor)['feedback']
     pending = [{'id': f['id'], 'title': f['title'], 'status': f['status'], 'task': f.get('linked_task')}

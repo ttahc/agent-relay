@@ -128,7 +128,8 @@ def events(service, state, actor):
         target = {"task_id": task["task_id"], "claim_id": claim["claim_id"]}
         work = claim["W"]
         if task.get("receiver") == actor and work["state"] == "review" and service.visible(state, task, actor):
-            add("review-requested", [claim["claim_id"], work["scope"], work.get("revision")], **target, revision=work.get("revision"))
+            add("review-requested", [claim["claim_id"], work["scope"], work.get("revision")], **target,
+                revision=work.get("revision"))
         if claim["origin"] != actor:
             continue
         if claim.get("scope_ack_pending"):
@@ -141,7 +142,8 @@ def events(service, state, actor):
     if security_schema(state) >= 5:
         for row in state["security"].get("execution", {}).get("actions", {}).values():
             if row.get("executor_id") == actor and row.get("state") == "granted":
-                add("resource-granted", [row["id"], row.get("grant_id"), row.get("generation")], task_id=row.get("task_id"),
+                add("resource-granted", [row["id"], row.get("grant_id"), row.get("generation")],
+                    task_id=row.get("task_id"),
                     claim_id=row.get("claim_id"), action_id=row["id"], grant_id=row.get("grant_id"))
     return sorted(found, key=lambda event: (event["type"], event["key"]))[:EVENT_LIMIT]
 

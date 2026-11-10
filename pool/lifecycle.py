@@ -94,7 +94,8 @@ class Lifecycle:
             # An admitted request may finish even if freeze began while reading it.
             if self.phase in {"freezing", "frozen", "backing_up"} and not getattr(self.local, "admitted", False):
                 raise Maintenance("服务正在升级，请保留原请求并稍后重试")
-            new_work = action in {"claim", "resume", "segment-open", "action-start"} or (action == "run-report" and (body or {}).get("state") == "intent")
+            new_work = (action in {"claim", "resume", "segment-open", "action-start"}
+                        or (action == "run-report" and (body or {}).get("state") == "intent"))
             if self.phase != "running" and new_work:
                 raise Maintenance("升级排空中，暂缓新领取或新开工；原任务与占用保留")
 
