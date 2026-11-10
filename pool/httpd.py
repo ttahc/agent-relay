@@ -20,7 +20,7 @@ from .packages import ClientError, MAX_JSON, strict_json
 from .service import PUBLIC_ACTIONS, Unavailable
 from .lifecycle import Maintenance
 from .sessions import DurableSessions
-from .wakeups import Wakeups, respond as wait_response
+from .wakeups import Wakeups, respond as wait_response, respond_workspace
 from 协作存储 import encoded
 
 
@@ -276,6 +276,8 @@ class Handler(BaseHTTPRequestHandler):
         if method == "GET" and (response := entry_page(self, target)) is not None:
             return response
         if not (target.scheme or target.netloc or target.fragment) and web.matches(target):
+            if method == "GET" and (response := respond_workspace(self, target)) is not None:
+                return response
             if method == "GET":
                 with service.lock, service.one_snapshot():
                     return web.dispatch(self, method, target)
