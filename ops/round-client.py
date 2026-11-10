@@ -1389,6 +1389,9 @@ def execution_command(state, api, args):
                                  for field in ("platform", "adapter", "model", "reasoning", "tools_version", "permissions_version", "environment")}
             body = {"context_id": args.context_id, "version": previous["version"] if previous else 0,
                     "config": config, "make_default": args.make_default}
+            environment_id = getattr(args, "environment_id", None)
+            if environment_id is not None or base.get("environment_id"):
+                body["environment_id"] = environment_id if environment_id is not None else base["environment_id"]
         elif route == "segment-open":
             view = api.call("tasks/" + quote(args.task, safe=""), state.data["token"])
             binding = own_claim(state, api, args.task, args.claim_id)
@@ -1831,6 +1834,7 @@ def build_parser():
     save_context.add_argument("--context-id", help="更新该配置的不可变下一版本；省略则创建新配置")
     for field in ("platform", "adapter", "model", "reasoning", "tools-version", "permissions-version", "environment"):
         save_context.add_argument("--" + field)
+    save_context.add_argument("--environment-id", help="管理员登记的执行环境编号；空字符串清除绑定，不从平台或环境描述推断")
     save_context.add_argument("--make-default", action="store_true", help="仅供新动作选择，不覆盖旧执行段")
     segment = commands.add_parser("segment")
     segment_commands = segment.add_subparsers(dest="operation", required=True)

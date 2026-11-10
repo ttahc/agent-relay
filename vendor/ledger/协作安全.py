@@ -2,13 +2,13 @@
 from copy import deepcopy
 from 协作存储 import Rejected
 
-READER = 5
+READER = 6  # Reader 6 understands trusted environment/domain proofs; execution schema remains 5.
 
 def check(state, reader=READER):
     fmt = state.get('pilot', {}).get('format', {})
     security = state.get('security', {})
     version = security.get('schema', fmt.get('schema', 1))
-    if type(version) is not int or version > reader or fmt.get('min_reader', 1) > reader:
+    if type(version) is not int or version > min(reader, 5) or fmt.get('min_reader', 1) > reader:
         raise ValueError('当前写入者不支持此账本安全语义')
     if fmt.get('schema', 1) >= 4 and (security.get('schema') != fmt['schema'] or
                                      security.get('phase') not in {'migrating', 'ready'}):

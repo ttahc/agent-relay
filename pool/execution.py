@@ -5,13 +5,15 @@ from copy import deepcopy
 from io import BytesIO
 from pathlib import Path
 import time
+import stat
+from types import SimpleNamespace
 import zipfile
 
 from .packages import ClientError, MAX_EXPANDED, MAX_FILES, MAX_PACKAGE, artifact_name, fields, string
 from .constants import COORDINATOR, step
 from .task_state import security_schema
 from .upgrade import identifier, version
-from . import delegation
+from . import delegation, environments
 import 协作执行 as engine
 import 协作升级 as rules
 from 协作存储 import digest
@@ -20,6 +22,10 @@ from 协作存储 import digest
 ACTIONS = engine.OPS
 READS = {"features", "execution"}
 FIELDS = {
+    "storage-domain-register": "storage_domain_id label independent evidence",
+    "storage-domain-merge": "storage_domain_id other_domain_id version evidence",
+    "environment-save": "environment_id version label kind executors active",
+    "resource-map-save": "environment_id domain version root active",
     "context-save": "context_id version config make_default",
     "segment-open": "task_id claim_id scope_version epoch context_id context_version",
     "action-prepare": "segment_id version description resources adapter_id",
@@ -87,14 +93,87 @@ def _stash(p):
     return [path, base64.b64encode(raw).decode("ascii")]
 
 
-def _proofs(service, resources):
-    """Resolve only explicitly configured server-local roots; all other domains stay conservative."""
-    roots = getattr(service, "execution_roots", {})
-    proofs = {}
+MAX_PROOF_ENTRIES = 4096
+
+
+def _directory_members(target):
+    """Bounded complete subtree proof. None means aliases cannot safely be excluded."""
+    pending, identities, count = [target], set(), 0
+    try:
+        while pending:
+            directory = pending.pop()
+            for child in directory.iterdir():
+                count += 1
+                if count > MAX_PROOF_ENTRIES or child.is_symlink() or getattr(child, "is_junction", lambda: False)():
+                    return None
+                info = child.stat()
+                identities.add(f"{info.st_dev}:{info.st_ino}")
+                if stat.S_ISDIR(info.st_mode):
+                    pending.append(child)
+        return sorted(identities)
+    except OSError:
+        return None
+
+
+def _proofs(service, resources, state=None, actor=None, context=None):
+    try:
+        return _resolve_proofs(service, resources, state, actor, context)
+    except ClientError:
+        raise
+    except (OSError, ValueError, RuntimeError) as error:
+        raise ClientError("资源目录或文件身份无法核实，请核对映射后重新建立动作", 409) from error
+
+
+def _domain_proof(state, domain_id):
+    """Remote aliases retain corroborating local evidence, including fresh hardlinks.
+
+    No local view means this remains administrator attestation only. A partial or
+    unavailable local view cannot prove isolation, even if its label says otherwise.
+    """
+    identities, paths = set(), set()
+    for mapping in environments.local_mappings(state):
+        if not mapping.get("storage_domain_id") or environments.canonical_domain(state, mapping["storage_domain_id"]) != environments.canonical_domain(state, domain_id):
+            continue
+        try:
+            observation = environments.observe_root(mapping["root"])
+            if observation["root_identity"] != mapping["root_identity"]:
+                return {"scope_uncertain": True}
+            proof = _proofs(SimpleNamespace(execution_roots={"root": observation["root"]}),
+                            [{"id": "path:", "domain": "root", "mode": "write"}])["root|path:"]
+        except ClientError:
+            return {"scope_uncertain": True}
+        if not proof.get("resolved"):
+            return {"scope_uncertain": True}
+        identities.update([proof["identity"], *proof.get("descendant_identities", [])])
+        paths.update(tuple(row) for row in proof.get("physical_paths", []))
+        if len(identities) > MAX_PROOF_ENTRIES or len(paths) > MAX_PROOF_ENTRIES:
+            return {"scope_uncertain": True}
+    return {"domain_identities": sorted(identities), "domain_paths": [list(row) for row in sorted(paths)]} if identities else {}
+
+
+def _resolve_proofs(service, resources, state=None, actor=None, context=None):
+    """Freeze trusted local identity or administrator-attested global scope; unknown stays conservative."""
+    mappings = environments.roots(state, actor, context) if context and state else None
+    roots = {key: row.get("root") for key, row in mappings.items()} if mappings is not None else getattr(service, "execution_roots", {})
+    proofs, domains = {}, {}
     for row in resources:
         if not row["id"].startswith("path:") or row["domain"] not in roots:
             continue
+        mapping = mappings.get(row["domain"]) if mappings is not None else None
+        provenance = ({"mapping_id": mapping["id"], "mapping_version": mapping["version"], "environment_id": mapping["environment_id"],
+                       **({"storage_domain_id": mapping["storage_domain_id"]} if mapping.get("storage_domain_id") else {})} if mapping else {})
+        domain_proof = {}
+        if mapping and mapping.get("storage_domain_id"):
+            sid = mapping["storage_domain_id"]
+            if sid not in domains:
+                domains[sid] = _domain_proof(state, sid)
+            domain_proof = domains[sid]
+        if mapping and mapping.get("mapping_kind") == "attested-domain":
+            proofs[row["domain"] + "|" + row["id"]] = {**provenance, **domain_proof, "proof_source": "administrator-attested"}
+            continue
         root = Path(roots[row["domain"]]).resolve(strict=True)
+        if mapping and environments.observe_root(str(root))["root_identity"] != mapping["root_identity"]:
+            raise ClientError("映射根目录身份已变化，请由管理员重新核实", 409)
         logical = row["id"][5:]
         target = root.joinpath(*logical.split("/"))
         for current in (target, *target.parents):
@@ -111,6 +190,24 @@ def _proofs(service, resources):
         identity = f"{info.st_dev}:{info.st_ino}" + ("/" + suffix if suffix != "." else "")
         proofs[row["domain"] + "|" + row["id"]] = {"identity": identity, "resolved": True,
             "canonical_path": target.resolve().as_posix().casefold(), "filesystem": str(info.st_dev)}
+        proof = proofs[row["domain"] + "|" + row["id"]]
+        # Physical ancestry also detects a directory reached through a bind-mount alias.
+        proof["ancestor_identities"] = [f"{part.stat().st_dev}:{part.stat().st_ino}"
+                                        for part in target.parents if part.exists()]
+        # The same existing ancestor can be exposed by multiple mount paths. Compare
+        # relative suffixes under its physical identity, including not-yet-created paths.
+        proof["physical_paths"] = [[f"{part.stat().st_dev}:{part.stat().st_ino}", target.relative_to(part).as_posix()]
+                                   for part in (target, *target.parents) if part.exists()]
+        if target.is_dir():
+            members = _directory_members(target)
+            if members is None:
+                proof.clear()  # Do not use a partial subtree to prove independence.
+                proof["scope_uncertain"] = True
+            else:
+                proof["descendant_identities"] = members
+        if mapping:
+            proof.update(provenance)
+            proof.update(domain_proof)
     return proofs
 
 
@@ -120,6 +217,10 @@ def plan(service, actor, action, key, body, state):
     extra = " supersedes_request_id" if "supersedes_request_id" in body else ""
     if action == "execution-fact" and "blocker_ids" in body:
         extra += " blocker_ids"
+    if action == "context-save" and "environment_id" in body:
+        extra += " environment_id"
+    if action == "resource-map-save":
+        extra += "".join(" " + key for key in ("mapping_kind", "storage_domain_id", "evidence") if key in body)
     fields(body, "request_id " + FIELDS[action] + extra)
     if any(body.get(name) and not isinstance(body[name], str) for name in IDENTIFIERS) or not (
             isinstance(body.get("blocker_ids", []), list) and all(isinstance(key, str) for key in body.get("blocker_ids", []))):
@@ -137,6 +238,31 @@ def plan(service, actor, action, key, body, state):
     for name in ("version", "scope_version", "epoch", "context_version", "generation"):
         if name in p:
             p[name] = version(p[name])
+    for name in ("environment_id", "storage_domain_id", "other_domain_id", "mapping_kind"):
+        if name in p and not isinstance(p[name], str):
+            raise ClientError("环境、存储域和映射种类须为文本")
+    if action in environments.OPS:
+        environments.require_admin(state, actor)
+        if action == "resource-map-save":
+            root = p.pop("root")
+            prior = state.get("security", {}).get("execution", {}).get("resource_mappings", {}).get(environments.mapping_id(p["environment_id"], p["domain"]))
+            if p["active"] is False:
+                if not prior:
+                    raise ClientError("停用映射须引用现有映射")
+                p.setdefault("mapping_kind", prior.get("mapping_kind", "server-local"))
+                p.setdefault("storage_domain_id", prior.get("storage_domain_id", ""))
+                if prior.get("mapping_kind") == "attested-domain":
+                    p.setdefault("evidence", deepcopy(prior["mapping_evidence"]))
+                else:
+                    p["root_observation"] = {name: prior[name] for name in ("root", "root_identity", "root_scope") if name in prior}
+            elif p.get("mapping_kind", "server-local") == "server-local":
+                p["root_observation"] = environments.observe_root(root)
+                if p.get("storage_domain_id"):
+                    observed = p["root_observation"]
+                    observed["root_scope"] = _proofs(SimpleNamespace(execution_roots={"root": observed["root"]}),
+                        [{"id": "path:", "domain": "root", "mode": "write"}])["root|path:"]
+            elif root != "":
+                raise ClientError("远端证明不读取服务端目录，root 须为空；请提供全局存储域及核实依据")
     binding = _binding(state, action, p)
     if action not in engine.FACT_OPS | {"context-save", "resource-release", "resource-cancel"}:
         task = state.get("tasks", {}).get(binding.get("task_id"))
@@ -152,10 +278,18 @@ def plan(service, actor, action, key, body, state):
                                   "delegated_operation": authorization_operation}
     file = _stash(p) if action == "evidence-stash" else None
     if action == "action-prepare":
-        p["resource_proofs"] = _proofs(service, engine.normalize_resources(state, p["resources"]))
+        selected = _row(state, "contexts", str(binding.get("context_id")) + ":" + str(binding.get("context_version")))
+        p["resource_proofs"] = _proofs(service, engine.normalize_resources(state, p["resources"]), state, actor, selected)
     elif action == "action-start":
         previous = _binding(state, action, p)
-        current = _proofs(service, previous.get("resources", []))
+        segment = _row(state, "segments", previous.get("segment_id"))
+        selected = _row(state, "contexts", str(segment.get("context_id")) + ":" + str(segment.get("context_version")))
+        current = _proofs(service, previous.get("resources", []), state, actor, selected)
+        # Older proofs did not store physical ancestry. Preserve their exact comparison.
+        for resource_key, proof in current.items():
+            for added in ("ancestor_identities", "physical_paths", "descendant_identities"):
+                if added not in previous.get("resource_proofs", {}).get(resource_key, {}):
+                    proof.pop(added, None)
         if previous.get("resource_proofs", {}) != current:
             raise ClientError("资源文件身份或父目录已变化，请重新建立动作并核对", 409)
     now = time.time()
@@ -172,6 +306,19 @@ def plan(service, actor, action, key, body, state):
     def public_record(record):
         # Stable deterministic result fields only; actual ledger event/time come from GET execution.
         return _public({name: value for name, value in record.items() if name not in {"event", "at"}})
+    if action in environments.OPS:
+        if action == "environment-save":
+            field, record = "environment", data["environments"][p["environment_id"]]
+        elif action == "resource-map-save":
+            field, record = "resource_mapping", data["resource_mappings"][environments.mapping_id(p["environment_id"], p["domain"])]
+        elif action == "storage-domain-register":
+            field, record = "storage_domain", data["storage_domains"][p["storage_domain_id"]]
+        else:
+            field, record = "storage_domain_merge", data["storage_domain_merges"]["merge-" + str(p["version"] + 1)]
+            result["affected_grants"] = [row["id"] for row in engine.blocking_records(candidate)
+                if any(resource.get("storage_domain_id") and environments.canonical_domain(candidate, resource["storage_domain_id"]) == record["canonical_domain"]
+                       for resource in row["resources"])]
+        result[field] = public_record(record)
     table = {"context-save": "contexts", "segment-open": "segments", "action-prepare": "actions", "resource-request": "resource_requests",
              "resource-cancel": "resource_requests", "execution-fact": "facts", "evidence-stash": "stashes"}.get(action)
     if table == "contexts":
@@ -203,7 +350,8 @@ def features(state):
             "automatic_end_confirmation": False,
             "trusted_adapter_ids": sorted(state.get("security", {}).get("execution", {}).get("adapters", {})),
             "budgets": {"evidence_stash_package": MAX_PACKAGE, "evidence_stash_expanded": MAX_EXPANDED, "evidence_stash_files": MAX_FILES},
-            "resource_policy": "atomic-set/conflict-fifo/unknown-blocks", "unknown_is_release": False}
+            "resource_policy": "atomic-set/conflict-fifo/unknown-blocks", "unknown_is_release": False,
+            "environment_registry": {"version": 1, "min_reader": 6, "mapping_authority": "system-admin", "proof_sources": ["server-local-filesystem", "administrator-attested-global-domain"], "domain_merges": "append-only"}}
 
 
 def can_profile(state, actor, executor):
@@ -258,7 +406,7 @@ def _can_view(state, actor, record):
 
 
 def _public(value):
-    private = {"authority", "resource_proofs", "canonical_path", "filesystem", "identity", "resolved"}
+    private = {"authority", "resource_proofs", "canonical_path", "filesystem", "identity", "resolved", "root", "root_identity", "root_scope", "ancestor_identities", "physical_paths", "descendant_identities", "domain_identities", "domain_paths", "mapping_evidence"}
     if isinstance(value, dict):
         return {key: _public(item) for key, item in value.items() if key not in private}
     if isinstance(value, list):
@@ -285,6 +433,7 @@ def read(state, actor, query=None):
     result = {"schema": security_schema(state, 3), "actor": actor, "executor_id": target,
               "can_write": actor == target, "default_context": deepcopy(data.get("defaults", {}).get(target)) if profile else None,
               "contexts": [{**row, "can_write": actor == row["executor_id"]} for row in contexts]}
+    result.update(environments.visible(state, actor, target))
     result["resource_domains"] = sorted(getattr(query, "resource_domains", []))
     for table in ("segments", "actions", "resource_requests", "grants", "facts", "stashes", "legacy", "blockers"):
         result[table] = [_public(row) for row in data.get(table, {}).values() if selected(row)]

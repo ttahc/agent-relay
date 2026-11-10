@@ -1,5 +1,6 @@
 """Security-5 execution contexts, immutable segments and atomic resource arbitration."""
 from copy import deepcopy
+from pool import environments
 import re
 
 from 协作存储 import digest, encoded
@@ -8,11 +9,11 @@ from 协作命令 import resource as old_resource, grants as covers_permission, 
 
 
 OPS = {"context-save", "segment-open", "action-prepare", "resource-request", "resource-cancel",
-       "action-start", "execution-fact", "evidence-stash", "resource-release"}
+       "action-start", "execution-fact", "evidence-stash", "resource-release"} | environments.OPS
 FACT_OPS = {"execution-fact", "evidence-stash"}
 DIMENSIONS = ("platform", "adapter", "model", "reasoning", "tools_version", "permissions_version", "environment")
 TABLES = ("contexts", "defaults", "segments", "actions", "resource_requests", "grants", "facts", "stashes",
-          "legacy", "blockers", "adapters", "capability_definitions", "evidence_bindings", "claim_bindings")
+          "legacy", "blockers", "adapters", "capability_definitions", "evidence_bindings", "claim_bindings") + environments.TABLES
 TERMINAL = {"finished", "error", "stopped", "not-started"}
 
 
@@ -211,15 +212,39 @@ def normalize_resources(state, values):
 def conflict(state, left, right):
     if left.get("identity") and right.get("identity") and left["identity"] == right["identity"]:
         return left["mode"] != "read" or right["mode"] != "read"
+    if (left.get("identity") in right.get("ancestor_identities", []) or
+            right.get("identity") in left.get("ancestor_identities", [])):
+        return left["mode"] != "read" or right["mode"] != "read"
+    left_members = set(left.get("descendant_identities", [])) | set(left.get("domain_identities", []))
+    right_members = set(right.get("descendant_identities", [])) | set(right.get("domain_identities", []))
+    if (left_members & (right_members | set(right.get("ancestor_identities", [])) | {right.get("identity")}) or
+            right_members & (set(left.get("ancestor_identities", [])) | {left.get("identity")})):
+        return left["mode"] != "read" or right["mode"] != "read"
+    for a_root, a_suffix in [*left.get("physical_paths", []), *left.get("domain_paths", [])]:
+        for b_root, b_suffix in [*right.get("physical_paths", []), *right.get("domain_paths", [])]:
+            if a_root == b_root and (a_suffix == b_suffix or a_suffix == "." or b_suffix == "." or
+                    a_suffix.startswith(b_suffix + "/") or b_suffix.startswith(a_suffix + "/")):
+                return left["mode"] != "read" or right["mode"] != "read"
     if left.get("resolved") and right.get("resolved") and left["id"].startswith("path:") and right["id"].startswith("path:"):
         a, b = left.get("canonical_path", ""), right.get("canonical_path", "")
         related = a == b or a.startswith(b.rstrip("/") + "/") or b.startswith(a.rstrip("/") + "/")
-        if a and b:
-            return related and (left["mode"] != "read" or right["mode"] != "read")
-    # Without a trusted filesystem proof, spelling cannot exclude hard-link aliases.
-    if left["id"].startswith("path:") and right["id"].startswith("path:"):
-        if not left.get("resolved") or not right.get("resolved"):
+        if a and b and related:
             return left["mode"] != "read" or right["mode"] != "read"
+    # Only server-mapped, administrator-attested domains can prove remote isolation.
+    # Never use the caller's resource.domain label for this decision. Local alias
+    # evidence above overrides even an administrator's mistaken distinct labels.
+    if left["id"].startswith("path:") and right["id"].startswith("path:"):
+        if left.get("scope_uncertain") or right.get("scope_uncertain"):
+            return left["mode"] != "read" or right["mode"] != "read"
+        left_domain, right_domain = left.get("storage_domain_id"), right.get("storage_domain_id")
+        if left_domain and right_domain:
+            return (environments.canonical_domain(state, left_domain) == environments.canonical_domain(state, right_domain) and
+                    (left["mode"] != "read" or right["mode"] != "read"))
+        if left_domain or right_domain or not left.get("resolved") or not right.get("resolved"):
+            return left["mode"] != "read" or right["mode"] != "read"
+        # Both local complete proofs were checked above and establish disjoint paths.
+        if left.get("canonical_path") and right.get("canonical_path"):
+            return False
     return old_conflicts(state, left, right)
 
 
@@ -261,6 +286,7 @@ def _claim(state, p):
 
 def _new_permission(state, actor, claim, task, context, now, authority=None, authorization_operation="claim"):
     from pool.delegation import operation_context
+    environments.check_context(state, actor, context)
     project = rules.task_project(task)
     rules.require(claim["origin"] == actor and claim["L"] == "active" and rules.active(state, actor), "须为原领取的有效执行者", "intent-final")
     rules.require(claim.get('E',{}).get('state')=='running' and not claim.get('E',{}).get('reason') and
@@ -377,6 +403,7 @@ def _arbitrate(state, now, event_id):
             operation = segment.get("authorization_operation", "claim")
             rules.require(action.get("authorization_operation", "claim") == operation, "动作与执行段的授权类别不符")
             _new_permission(state, action["executor_id"], claim, task, context, now, request.get("authority"), operation)
+            environments.check_mappings(state, action)
             _within(state, task, request["resources"])
             _resource_permission(state, action["executor_id"], task, request["resources"])
         except Exception as error:
@@ -417,11 +444,20 @@ def action(state, env, context):
     candidate = {**state, "security": deepcopy(state["security"])}
     _apply(candidate, p, actor, now, env["event_id"])
     state["security"] = candidate["security"]
+    if op in environments.OPS or (op == "action-prepare" and any(
+            "physical_paths" in proof or "descendant_identities" in proof for proof in p.get("resource_proofs", {}).values())):
+        # Persist a reader floor: older binaries replay stored effects but do not
+        # understand these collision proofs, so they must refuse this store.
+        state["pilot"] = {**state["pilot"], "format": {**state["pilot"]["format"], "min_reader": 6}}
 
 
 def _apply(state, p, actor, now, event_id):
     data = ensure(state)
     op = p["op"]
+    if op in environments.OPS:
+        environments.apply(state, p, actor, now, event_id)
+        _arbitrate(state, now, event_id)
+        return
     if op == "context-save":
         context_id = p["context_id"]
         rows = [row for row in data["contexts"].values() if row["context_id"] == context_id]
@@ -436,6 +472,12 @@ def _apply(state, p, actor, now, event_id):
         rules.require(type(p["make_default"]) is bool, "须明确是否作为新动作默认配置")
         record = {"id": context_id, "context_id": context_id, "version": latest + 1, "executor_id": actor,
                   "config": deepcopy(config), "at": now, "event": event_id}
+        previous = max(rows, key=lambda row: row["version"]) if rows else {}
+        environment_id = p.get("environment_id", previous.get("environment_id", ""))
+        rules.require(isinstance(environment_id, str), "执行环境编号须为文本")
+        if environment_id:
+            instance = environments.selected(state, actor, identifier(environment_id, "执行环境编号"))
+            record.update(environment_id=instance["id"], environment_version=instance["version"])
         data["contexts"][context_id + ":" + str(latest + 1)] = record
         if p["make_default"]:
             data["defaults"][actor] = {"context_id": context_id, "version": latest + 1}
@@ -572,6 +614,7 @@ def _apply(state, p, actor, now, event_id):
     authorization_operation = segment.get("authorization_operation", "claim")
     rules.require(target.get("authorization_operation", "claim") == authorization_operation, "动作与原段的授权操作类别不符")
     _new_permission(state, actor, claim, task, selected, now, p.get("authority"), authorization_operation)
+    environments.check_mappings(state, target)
     if op == "resource-request":
         resources = normalize_resources(state, p["resources"])
         rules.require(resources == target["resources"], "请以新动作申请完整资源集合；不支持持锁追加或读写升级")
@@ -594,6 +637,9 @@ def _apply(state, p, actor, now, event_id):
         grant = data["grants"].get(p["grant_id"])
         rules.require(grant and grant["action_id"] == target["id"] and grant["generation"] == p["generation"] and grant["state"] == "granted", "授权已变化或不属于此动作")
         rules.require(target["state"] in {"granted", "start-authorized"}, "启动结果不明或已执行，不能重新发出开始许可")
+        rules.require(not any(row.get("id") != grant["id"] and row.get("action_id") != target["id"] and
+                              _sets_conflict(state, grant["resources"], row["resources"]) for row in blocking_records(state)),
+                      "资源等价关系或保护范围已变化；须先核实其他占用，不能按旧授权开始")
         _within(state, task, target["resources"])
         _resource_permission(state, actor, task, target["resources"])
         load = execution_load(state, actor, exclude_action=target["id"])

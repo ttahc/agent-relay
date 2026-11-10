@@ -28,7 +28,7 @@ import 协作升级 as rules
 PUBLIC_ACTIONS = {"register", "claim", "handoff", "deliver", "deliver-files", "stop",
                   "return", "resume", "review", "close", "cancel", "withdraw"} | upgrade.ACTIONS | round_service.PUBLIC | {
                     'context-save', 'segment-open', 'action-prepare', 'resource-request', 'resource-cancel', 'action-start',
-                    'execution-fact', 'evidence-stash', 'resource-release'}
+                    'execution-fact', 'evidence-stash', 'resource-release', 'environment-save', 'resource-map-save', 'storage-domain-register', 'storage-domain-merge'}
 
 
 @contextmanager
@@ -106,7 +106,7 @@ class Service:
         self.notices = round_service.Notices(self.db)
         snap = self.snapshot()
         fmt = snap["state"]["pilot"].get("format")
-        if fmt and (fmt["schema"] not in {2, 3, 4, 5} or fmt["min_reader"] > 5):
+        if fmt and (fmt["schema"] not in {2, 3, 4, 5} or fmt["min_reader"] > 6):
             raise Unavailable("当前程序不支持数据合同版本")
         self.accounts.baseline_executors(snap)
 
