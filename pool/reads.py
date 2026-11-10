@@ -302,6 +302,7 @@ def account_table(r, argument):
         if subject["kind"] not in {"human", "executor"}:
             continue
         rows.append({"name": name, "kind": subject["kind"], "status": subject["status"], "owner": subject.get("owner"),
+                     "credential": subject.get("credential"),
                      "platform": subject.get("platform"), "window": subject.get("window"), "admin": rules.system_admin(state, name),
                      "window_name": subject.get("window_name"),
                      "projects": [{"name": p["name"], "roles": sorted(rules.grant(state, p["id"], name)["roles"])}

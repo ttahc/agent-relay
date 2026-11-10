@@ -232,10 +232,18 @@ def accounts_page(actor, rows, invite, code, controls):
                  f'<td>{"系统管理员" if row["admin"] else "普通成员"}</td><td class="wide muted-text">{projects}</td>'
                  f'<td><span class="{kind}">{status}</span></td><td><div class="ops">{action}</div></td></tr>')
     opened = " open" if code else ""
+    restore = "".join(
+        pages.form("credential-change", f'重新启用 {e(row["name"])}',
+                   {"name": row["name"], "version": row["credential"], "status": "active"},
+                   ui.text_field("reason", f'重新启用 {e(row["name"])} 的依据'), secondary=True)
+        for row in rows if row["kind"] == "human" and row["status"] == "disabled" and not row["admin"])
+    if restore:
+        restore = ui.block("重新启用已停用的人员", '<p class="muted-text">重新启用后用原密码登录；停用前的登录会话和访问令牌不会恢复。'
+                           '名下窗口随责任人恢复认证，已单独停用、暂停或归档的窗口保持原状。</p>' + restore)
     return work(actor, f"""<div class="table-wrap"><table><thead><tr><th>账号</th><th>类型</th><th>系统角色</th><th>所在项目</th><th>状态</th><th>操作</th></tr></thead>
     <tbody>{body}</tbody></table></div>
   <p class="muted-text">停用后不能登录或调用接口，历史记录保留。重置密码和轮换令牌的结果只显示一次。</p>
-  <details class="action-details"{opened}><summary>生成人员邀请码</summary>{code}{invite}</details>{controls}""")
+  <details class="action-details"{opened}><summary>生成人员邀请码</summary>{code}{invite}</details>{restore}{controls}""")
 
 
 def permissions_page(actor):
