@@ -622,11 +622,13 @@ def apply_for_window(state, api, args):
         try:
             result = api.call("window-apply", body=data["application"])
         except RequestError as error:
-            if error.status == 404:
-                raise ValueError("当前服务不支持窗口申请；请升级服务，或改用邀请链接登记") from None
-            if error.status in {403, 409, 429} and not data.get("applied"):
+            if error.status in {403, 404, 409, 429} and not data.get("applied"):
                 data.clear()  # nothing was filed; the credential file stays free for another attempt
                 state.save()
+            if error.status == 404:
+                raise ValueError("当前服务不支持窗口申请；" + (
+                    "请确认服务地址和版本后用相同凭据文件运行 enroll 重试" if data else
+                    "此凭据文件未保留申请，可升级服务后重新申请，或直接用它改走邀请登记（enroll --invite-url）")) from None
             raise
         status = result.get("status")
         if status in {"pending_activation", "active"} and result.get("token"):
@@ -640,14 +642,17 @@ def apply_for_window(state, api, args):
             state.save()
             return {"status": status, "message": result.get("message") or APPLICATION_ENDED[status],
                     "next": "此凭据文件已清空，可向负责人确认后重新运行 enroll --apply 提交新的申请"}
-        if status != "pending_approval":
+        if status not in {"pending_approval", "approved"}:
             raise ValueError("服务申请回执不完整，请稍后重新运行 enroll")
         if not data.get("applied"):
             data["applied"] = True
             state.save()
-        summary = {"status": "pending_approval", "pairing_code": result["pairing_code"], "project": result.get("project"),
+        # "approved" without a credential: the registration is still being confirmed. The application and its
+        # recovery secret stay in the credential file, so the same request can be repeated.
+        summary = {"status": status, "pairing_code": result["pairing_code"], "project": result.get("project"),
                    "owner": result.get("owner"), "expires": result.get("expires"), "credential_location": str(state.path),
-                   "next": "把配对码告诉负责人，由负责人在网页「邀请窗口」核对后同意；之后用相同凭据文件运行 enroll 查询结果并完成激活"}
+                   "next": "负责人已同意，登记尚待服务确认；稍后用相同凭据文件运行 enroll 完成登记和激活" if status == "approved" else
+                           "把配对码告诉负责人，由负责人在网页「邀请窗口」核对后同意；之后用相同凭据文件运行 enroll 查询结果并完成激活"}
         left = wait - (time.monotonic() - started)
         if left <= 0:
             return summary

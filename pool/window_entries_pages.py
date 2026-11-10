@@ -76,12 +76,14 @@ def source_lines(source):
 
 
 def waiting(entry, application, form):
+    # Only what this person may give to windows of this owner; with nothing to give, the full list and the rules decide.
+    choices = [row for row in ROLE_CHOICES if set(row[0].split(",")) <= set(entry["roles"])] or ROLE_CHOICES
     return (f'<li><strong>配对码 {escape(application["pairing"])}</strong> · {escape(entry["platform"])} · 项目 {escape(entry["project"])}'
             f' · 负责人 {escape(entry["owner"])} · 申请于 {time_html(application["created"])}'
             f'<p class="muted-text">以下资料由窗口自行填报，未经服务核实。请先与窗口显示的配对码核对一致，再决定。</p>'
             f'<ul>{source_lines(application["source"])}</ul>'
             + form("/invitations", task_pages.hidden("operation", "apply-approve") + task_pages.hidden("application_id", application["id"])
-                   + upgrade_pages.selection("roles", "同意后的窗口项目权限", ROLE_CHOICES, "executor"), "同意登记")
+                   + upgrade_pages.selection("roles", "同意后的窗口项目权限", choices, choices[0][0]), "同意登记")
             + upgrade_pages.block("拒绝这项申请", form("/invitations", task_pages.hidden("operation", "apply-reject")
                                                  + task_pages.hidden("application_id", application["id"])
                                                  + upgrade_pages.input_field("reason", "拒绝原因", size=400), "拒绝申请"))

@@ -1,10 +1,12 @@
 """Windows of a joined platform ask to register; the responsible person agrees on the web page.
 
-Everything runs against the packaged service on a disposable real store: real HTTP requests, the
-real web forms, and the real client. No production store is read.
+The first class runs against the packaged service on a disposable real store: real HTTP requests,
+the real web forms, and the real client. The second covers answers that a healthy store does not
+give on demand. No production store is read.
 """
 from contextlib import closing
 from html import unescape
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -13,13 +15,22 @@ import secrets
 import sqlite3
 import subprocess
 import sys
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 import zipfile
+
+from pool import window_entries
+from pool.packages import ClientError
 
 from verify import ROOT, call, server as running_service
 from verify_round import Browser, Client, auth_checks, request_id, setup
 from verify_support import scratch
 from verify_upgrade import PROJECT, source
+
+SPEC = importlib.util.spec_from_file_location("apply_client", ROOT / "ops/round-client.py")
+client = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(client)
 
 PERSON_PASSWORD = "隔离验收 更换后的不同密码 New-Fruit!"  # set for fixture-person by verify_round.auth_checks
 
@@ -327,6 +338,133 @@ class WindowApplications(unittest.TestCase):
     def test_14_the_service_says_it_takes_applications(self):
         self.assertTrue(call(self.url + "/features", self.token())[1]["features"]["window-apply"])
         self.assertEqual(call(self.url + "/window-apply")[0], 404, "reading the address tells nothing")
+
+    # --- boundaries reported in review ---------------------------------------------------------
+
+    def test_15_one_session_queues_once_across_entry_points(self):
+        other = self.new_entry(self.owner, "worker-a")
+        self.assertEqual(self.ask(session="roaming-session")[1][0], 200)
+        status, value = self.ask(other, "roaming-session")[1]
+        self.assertEqual((status, "待处理" in value["message"]), (409, True), value)
+        self.assertEqual(self.ask(self.new_entry(self.owner, "worker-a", "external"), "roaming-session", "external")[1][0], 200,
+                         "a session is known per platform")
+        # Agreed and not yet picked up: asking again elsewhere would only produce a second approval.
+        body, (_, first) = self.ask(session="agreed-session")
+        self.assertEqual(self.form(self.owner, "apply-approve", application_id=first["application_id"], roles="executor")[0], 200)
+        for entry in (self.entry, other):
+            status, value = self.ask(entry, "agreed-session")[1]
+            self.assertEqual((status, "已获同意" in value["message"]), (409, True), value)
+        # Once the agreement is withdrawn the session may ask again.
+        invite = self.stored("SELECT invite_id FROM window_applications WHERE id=?", (first["application_id"],))[0][0]
+        self.assertEqual(self.form(self.owner, "revoke", invite_id=invite, reason="撤回同意")[0], 200)
+        self.assertEqual(self.ask(other, "agreed-session")[1][1]["status"], "pending_approval")
+
+    def test_16_an_owner_with_only_the_review_role(self):
+        # "reviewer" holds the receiver role only. Like an ordinary invitation, a manager may open the entry point.
+        entry = self.new_entry(self.admin, "reviewer")
+        body, (status, value) = self.ask(entry, "review-window")
+        self.assertEqual(status, 200, value)
+        page = self.admin.send("/invitations")[2].decode()
+        offered = re.search(r"配对码 " + value["pairing_code"] + r"</strong>.*?同意登记", page, re.S)[0]
+        self.assertEqual(re.findall(r'<option value="([a-z,]+)"', offered), ["receiver"], "only what this owner's windows may hold")
+        self.assertEqual(self.form(self.admin, "apply-approve", application_id=value["application_id"], roles="executor")[0], 403)
+        self.assertEqual(self.form(self.admin, "apply-approve", application_id=value["application_id"], roles="receiver")[0], 200)
+        issued = call(self.url + "/window-apply", data=body)[1]
+        self.assertEqual((issued["status"], issued["roles"]), ("pending_activation", ["receiver"]), issued)
+        call(self.url + "/ai-activate", issued["token"], {"request_id": request_id(), "registration_id": issued["registration_id"]})
+        identity = Client(self.url, issued["token"]).get("identity")
+        self.assertEqual((identity["binding"]["owner"], identity["projects"][0]["roles"]), ("reviewer", ["receiver"]))
+        # A person with no role in the project still cannot be given an entry point.
+        self.assertEqual(self.form(self.admin, "entry-create", project_id=PROJECT, platform="codex", owner="fixture-person")[0], 403)
+
+
+class Record:
+    """A credential file in memory."""
+
+    def __init__(self, **data):
+        self.data, self.path, self.saved = data, Path("window.credential"), 0
+
+    def save(self):
+        self.saved += 1
+
+
+class Scripted:
+    """A service that gives prepared answers to window-apply."""
+
+    def __init__(self, *answers):
+        self.answers, self.bodies = list(answers), []
+
+    def call(self, route, token=None, body=None):
+        self.bodies.append(body)
+        answer = self.answers.pop(0)
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
+
+
+class Boundaries(unittest.TestCase):
+    """Answers that must not end an application: a registration still being confirmed, and a service too old to ask."""
+
+    APPLICATION = {"request_id": "apply-fixture", "entry_id": "e-fixture", "code": "c" * 43, "recovery": "r" * 43, "source": {}}
+
+    def answer(self, outcome):
+        application = {"id": "w-fixture", "state": "approved", "proof_sha": "0" * 64, "client_request": "apply-fixture",
+                       "invite_id": "i-fixture", "source": {}, "roles": ["executor"], "reason": None, "created": 0}
+        entry = {"id": "e-fixture", "project": PROJECT, "owner": "worker-a", "platform": "codex", "revoked": None}
+        state = {"round": {"invite:i-fixture": {"issuer": "worker-a"}}}
+        service = SimpleNamespace(accounts=SimpleNamespace(token=lambda *names: "t" * 43))
+        with patch.object(window_entries.round_service, "bootstrap", side_effect=[outcome]):
+            return window_entries.answer(service, application, entry, state, "r" * 43)
+
+    def test_a_registration_still_being_confirmed_is_not_a_lapsed_agreement(self):
+        for outcome in ((202, {"status": "pending", "request_id": "prepare-x"}),
+                        (503, {"status": "maintenance", "retryable": True, "message": "稍后"})):
+            value = self.answer(outcome)
+            self.assertEqual((value["status"], value["retry"]), ("approved", True), value)
+            self.assertNotIn("token", value)
+        with self.assertRaises(ClientError) as raised:
+            self.answer(ClientError("前序操作待确认，请重试原请求", 503))
+        self.assertEqual(raised.exception.status, 503)
+        self.assertEqual(self.answer((409, {"status": "rejected", "message": "邀请已撤销或授权已失效"}))["status"], "lapsed")
+        self.assertEqual(self.answer(ClientError("邀请码无效", 403))["status"], "lapsed")
+        self.assertEqual(self.answer((200, {"status": "pending_activation", "token": "t", "registration_id": "a-1"}))["status"],
+                         "pending_activation")
+
+    def test_the_client_keeps_its_application_until_the_registration_is_confirmed(self):
+        waiting = {"status": "approved", "retry": True, "pairing_code": "123456", "project": PROJECT, "owner": "worker-a"}
+        state = Record(url="http://127.0.0.1:1", application=dict(self.APPLICATION), applied=True)
+        api = Scripted(waiting, waiting, {"status": "pending_activation", "token": "issued-token", "registration_id": "a-1"})
+        first = client.apply_for_window(state, api, SimpleNamespace(wait=0))
+        self.assertEqual(first["status"], "approved")
+        self.assertEqual(state.data["application"], self.APPLICATION, "the recovery material is kept")
+        with patch.object(client, "finish_activation", return_value={"status": "active"}) as finish, \
+                patch.object(client.time, "sleep"):
+            self.assertEqual(client.apply_for_window(state, api, SimpleNamespace(wait=30)), {"status": "active"})
+        finish.assert_called_once()
+        self.assertEqual(api.bodies, [self.APPLICATION] * 3, "the same request is repeated")
+        self.assertEqual((state.data["token"], state.data["registration_id"]), ("issued-token", "a-1"))
+        self.assertNotIn("application", state.data)
+
+    def test_a_service_without_the_interface_leaves_the_file_free_for_an_invitation(self):
+        missing = client.RequestError(404, {"message": "接口不存在"})
+        state = Record(url="http://127.0.0.1:1", application=dict(self.APPLICATION))
+        with self.assertRaises(ValueError) as raised:
+            client.apply_for_window(state, Scripted(missing), SimpleNamespace(wait=0))
+        self.assertIn("enroll --invite-url", str(raised.exception))
+        self.assertEqual(state.data, {})
+        # The same file now takes an ordinary invitation.
+        invitation = {"protocol": 1, "kind": "ai-window", "id": "i-fixture", "code": "c" * 43, "url": "http://127.0.0.1:1"}
+        options = SimpleNamespace(invite=None, invite_url="link", apply=None, wait=0)
+        with patch.object(client, "load_invitation", return_value=invitation), patch.object(client, "source", return_value={}), \
+                patch.object(client, "endpoint", return_value=Scripted({"token": "issued-token", "registration_id": "a-1"})), \
+                patch.object(client, "finish_activation", return_value={"status": "active"}):
+            self.assertEqual(client.enroll(state, options), {"status": "active"})
+        self.assertEqual(state.data["request"]["invite_id"], "i-fixture")
+        # An application the service had already accepted is not thrown away by a passing 404.
+        state = Record(url="http://127.0.0.1:1", application=dict(self.APPLICATION), applied=True)
+        with self.assertRaises(ValueError):
+            client.apply_for_window(state, Scripted(missing), SimpleNamespace(wait=0))
+        self.assertEqual(state.data["application"], self.APPLICATION)
 
 
 if __name__ == "__main__":

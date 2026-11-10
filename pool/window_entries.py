@@ -22,6 +22,7 @@ MAX_PENDING = 10  # applications waiting at one entry point
 PENDING_SECONDS = 72 * 3600  # an application nobody decided lapses
 PICKUP_HOURS = 72  # after agreement, the window has this long to come back for its credential
 ROLES = {"executor", "receiver"}
+REFUSED = {400, 403, 404, 409}  # answers of the registration rules that repeating the request cannot change
 ENTRY_FIELDS = ("id", "project", "platform", "owner", "issuer", "created", "revoked", "revoked_by", "reason")
 APPLICATION_FIELDS = ("id", "entry", "client_request", "request_sha", "proof_sha", "source", "created", "state",
                       "decided_by", "decided", "invite_id", "roles", "reason")
@@ -60,9 +61,30 @@ def pairing(application):
     return f"{number % 1000000:06d}"
 
 
+def grantable(state, issuer, project, owner):
+    """The window roles this person could give by invitation to windows of that owner."""
+    return [role for role in sorted(ROLES) if invite_allowed(state, issuer, project, owner, [role])]
+
+
 def usable(state, entry):
-    return bool(entry) and not entry["revoked"] and invite_allowed(state, entry["issuer"], entry["project"], entry["owner"],
-                                                                 ["executor"])
+    return bool(entry) and not entry["revoked"] and bool(grantable(state, entry["issuer"], entry["project"], entry["owner"]))
+
+
+def claimed(service, state, platform, session, now=None):
+    """Whether this platform session already has an application that is waiting or agreed and not yet picked up."""
+    for row in application_rows(service.db, "state IN ('pending','approved')"):
+        entry = entry_row(service.db, row["entry"])
+        if entry["platform"] != platform or row["source"].get("session") != session:
+            continue
+        if row["state"] == "pending":
+            if stage(row, entry, now) == "pending":
+                return "该会话已有待处理的申请，请等待负责人处理"
+            continue
+        invite = state["round"].get("invite:" + row["invite_id"])
+        if (invite and round_service.usable_invite(state, invite) and invite["used"] < invite["count"]
+                and invite["expires"] > (time.time() if now is None else now)):
+            return "该会话的申请已获同意，请用原凭据文件运行 enroll 完成登记"
+    return ""
 
 
 def visible(state, actor, entry):
@@ -89,8 +111,8 @@ def create(service, actor, request_id, project, platform, owner):
         state = service.snapshot()["state"]
         if not enabled(state):
             raise ClientError("须先迁移本轮数据合同", 409)
-        if not invite_allowed(state, actor, project, owner, ["executor"]):
-            raise ClientError("只有项目管理员，或为本人名下窗口设置的人员，可以建立平台接入点", 403)
+        if not grantable(state, actor, project, owner):
+            raise ClientError("只有项目管理员，或为本人名下执行窗口设置的人员，可以建立平台接入点；负责人须在项目中有执行或验收权限", 403)
         entry_id = "e-" + digest(encoded([actor, request_id]))[:32]
         existing = entry_row(service.db, entry_id)
         if existing:
@@ -134,6 +156,7 @@ def overview(service, actor):
             rows = [{**row, "stage": stage(row, entry), "pairing": pairing(row)}
                     for row in application_rows(service.db, "entry=?", (entry_id,))]
             found.append({**entry, "usable": usable(state, entry), "applications": rows,
+                          "roles": [role for role in sorted(ROLES) if invite_allowed(state, actor, entry["project"], entry["owner"], [role])],
                           "pending": sum(row["stage"] == "pending" for row in rows)})
         return found
 
@@ -160,10 +183,12 @@ def answer(service, application, entry, state, recovery):
         if error.status == 503:
             raise
         status, result = error.status, {"message": str(error)}
-    if status != 200:
-        reason = result.get("message") or (result.get("steps") or [{}])[-1].get("reason", "")
-        return {**value, "status": "lapsed", "message": "同意已失效，请重新申请" + (f"（{reason}）" if reason else "")}
-    return {**value, **result, "roles": application["roles"]}
+    if status == 200:
+        return {**value, **result, "roles": application["roles"]}
+    if status not in REFUSED:  # still being confirmed, or the service is busy: the same request can be repeated
+        return {**value, "retry": True, "message": "已同意，登记尚待服务确认，请稍后用相同凭据文件重试"}
+    reason = result.get("message") or (result.get("steps") or [{}])[-1].get("reason", "")
+    return {**value, "status": "lapsed", "message": "同意已失效，请重新申请" + (f"（{reason}）" if reason else "")}
 
 
 def apply(service, body):
@@ -202,8 +227,8 @@ def apply(service, body):
             raise ClientError("该平台会话已登记，请沿用原窗口凭据", 409)
         waiting = [row for row in application_rows(service.db, "entry=? AND state='pending'", (entry_id,))
                    if stage(row, entry) == "pending"]
-        if any(row["source"].get("session") == body["source"].get("session") for row in waiting):
-            raise ClientError("该会话已有待处理的申请，请等待负责人处理", 409)
+        if message := claimed(service, state, profile["platform"], body["source"].get("session")):
+            raise ClientError(message, 409)
         if len(waiting) >= MAX_PENDING:
             raise ClientError("该接入点待处理的申请已满，请联系负责人处理后重试", 429)
         with service.db:
