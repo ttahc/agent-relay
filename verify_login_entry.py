@@ -31,7 +31,8 @@ def main():
             password_page(browser.send("/login"))
             browser.login("admin", password)
             status, _, body = browser.send("/")
-            assert status == 200 and "任务看板".encode() in body
+            assert status == 200 and "<title>我的工作 · 内网任务服务</title>".encode() in body
+            assert b'href="/board"' in body
             assert b'name="password"' not in body
             assert browser.send("/logout", "POST")[0] == 303
             password_page(browser.send("/"))
