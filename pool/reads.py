@@ -26,8 +26,8 @@ class Reading:
     def __init__(self, service, snap, actor, route, argument):
         self.service, self.snap, self.actor, self.route = service, snap, actor, route
         self.state = state = snap["state"]
-        self.list_full = security_schema(state)<5
-        if route in {'tasks','task-options'} and isinstance(argument,dict):
+        self.list_full = security_schema(state) < 5
+        if route in {'tasks', 'task-options'} and isinstance(argument, dict):
             self.list_full = argument.get('full') == '1'
             argument = argument.get('project')
         self.argument = argument
@@ -44,10 +44,10 @@ DECLINED = object()  # returned by a route that leaves the request to the stored
 
 
 def features(r, argument):
-    result=execution.features(r.state)
-    result.update(api_protocol=1,input_download=dict(input_packages.BUDGET))
-    result.setdefault('features',{})['input-package']=True
-    result['features']['list-summary']=True
+    result = execution.features(r.state)
+    result.update(api_protocol=1, input_download=dict(input_packages.BUDGET))
+    result.setdefault('features', {})['input-package'] = True
+    result['features']['list-summary'] = True
     return result
 
 
@@ -122,8 +122,8 @@ def tasks(r, argument):
     if r.round_enabled:
         available.sort(key=lambda task: (not task["qualification"]["prioritized"], -task["priority"], task["created_seq"]))
     if not r.list_full:
-        available=[service.task_summary(task) for task in available]
-    return {"repo_id": service.desk.meta["repo_id"], "head": r.snap["head"], "tasks": available, 'summary':not r.list_full}
+        available = [service.task_summary(task) for task in available]
+    return {"repo_id": service.desk.meta["repo_id"], "head": r.snap["head"], "tasks": available, 'summary': not r.list_full}
 
 
 def task_options(r, argument):
@@ -137,7 +137,7 @@ def task_options(r, argument):
         for requirement in spec.get("requirements", []):
             hint = {"project_id": rules.task_project(task), **requirement}
             hints[encoded(hint)] = hint
-    return {"tasks": rows if r.list_full else [service.task_summary(task) for task in rows], 'summary':not r.list_full,
+    return {"tasks": rows if r.list_full else [service.task_summary(task) for task in rows], 'summary': not r.list_full,
             "counts": {"visible": len(rows),
             "claimable": sum(task["qualification"]["eligible"] for task in rows)},
             "missing_summary": [{"reason": reason, "count": count} for reason, count in sorted(reasons.items())],
@@ -157,7 +157,7 @@ def overview(r, argument):
                      if cid in state["claims"] and state["claims"][cid].get("task_id") == task["task_id"]), None)
         last_identity = (rules.identity(state, last["origin"]) or {}) if last else {}
         shown.append({**task, "stage": stage(task, current, state),
-                      'execution_status':execution_status(state,current),
+                      'execution_status': execution_status(state, current),
                       "project_name": project["name"] if project else None,
                       "window": (rules.identity(state, current["origin"]) or {}).get("window") if current else None,
                       "window_name": (rules.identity(state, current["origin"]) or {}).get("window_name") if current else None,
@@ -185,7 +185,7 @@ def project(r, argument):
     project = next((p for p in upgrade.projects(state, actor) if p["id"] == argument), None)
     if not project:
         raise ClientError("项目不存在或无权查看", 404)
-    return {**project, "members": r.service.members(state, argument), "identity_choices":release_views.identities(state,actor),
+    return {**project, "members": r.service.members(state, argument), "identity_choices": release_views.identities(state, actor),
             "automation": state["round"].get("automation:" + argument, {"enabled": False, "version": 0}) if r.round_enabled else None}
 
 
@@ -194,15 +194,15 @@ def projects(r, argument):
 
 
 def input_package(r, argument):
-    return input_packages.package(r.service,r.actor,r.state,argument)
+    return input_packages.package(r.service, r.actor, r.state, argument)
 
 
 def invitation_owners(r, argument):
-    return {"owners":release_views.invitation_owners(r.state,r.actor,argument)}
+    return {"owners": release_views.invitation_owners(r.state, r.actor, argument)}
 
 
 def release_readiness(r, argument):
-    return public(release_views.readiness(r.state,r.actor))
+    return public(release_views.readiness(r.state, r.actor))
 
 
 def project_capabilities(r, argument):
@@ -221,10 +221,10 @@ def executors(r, argument):
     sources = upgrade.sources(state, actor)
     if r.round_enabled:
         round_service.annotate_sources(service, state, sources)
-    sources=[window_source(state,actor,source) for source in sources]
+    sources = [window_source(state, actor, source) for source in sources]
     for source in sources:
-        source['can_manage']=window_admin.allowed(state,actor,source['executor_id'])
-        source['can_manage_projects']=rules.system_admin(state,actor)
+        source['can_manage'] = window_admin.allowed(state, actor, source['executor_id'])
+        source['can_manage_projects'] = rules.system_admin(state, actor)
     if r.route == "window-cards":
         joined = upgrade.projects(state, actor)
         for source in sources:
@@ -237,12 +237,12 @@ def executors(r, argument):
 
 def identity(r, argument):
     state, actor = r.state, r.actor
-    data=state.get('security',{}).get('execution',{})
+    data = state.get('security', {}).get('execution', {})
     return {"identity": actor, "binding": rules.identity(state, actor), "projects": upgrade.projects(state, actor),
-            'default_context':data.get('defaults',{}).get(actor),
-            'active_task_contexts':[{'segment_id':key,**{k:row.get(k) for k in ('task_id','claim_id','context_id','context_version')}}
-                for key,row in data.get('segments',{}).items() if row.get('executor_id')==actor and
-                state['claims'].get(row.get('claim_id'),{}).get('L')=='active']}
+            'default_context': data.get('defaults', {}).get(actor),
+            'active_task_contexts': [{'segment_id': key, **{k: row.get(k) for k in ('task_id', 'claim_id', 'context_id', 'context_version')}}
+                for key, row in data.get('segments', {}).items() if row.get('executor_id') == actor and
+                state['claims'].get(row.get('claim_id'), {}).get('L') == 'active']}
 
 
 def delegations(r, argument):
@@ -355,10 +355,10 @@ def board(r, argument):
 
 def stash_artifact(r, argument):
     state = r.state
-    if not execution.stash_reference_allowed(state,r.actor,argument):
+    if not execution.stash_reference_allowed(state, r.actor, argument):
         return DECLINED
-    row=next(row for row in state['security']['execution']['stashes'].values()
-             if row.get('bundle',{}).get('path')==argument)
+    row = next(row for row in state['security']['execution']['stashes'].values()
+             if row.get('bundle', {}).get('path') == argument)
     return r.service.checked_file(row['bundle'])
 
 

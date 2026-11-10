@@ -39,7 +39,8 @@ def one_value(name):
 
 
 def listing_query(query):
-    if 'full' in query and query['full']!='1':raise ClientError('full 只接受1')
+    if 'full' in query and query['full'] != '1':
+        raise ClientError('full 只接受1')
     return query if 'full' in query else query.get('project')
 
 
@@ -47,13 +48,13 @@ def listing_query(query):
 # becomes the argument of Service.read, the content type, and whether only round mode serves it.
 READ_API = {
     "features": (None, None, JSON, False),
-    "execution": ({'task_id','claim_id','action_id','executor_id'}, whole_query, JSON, False),
-    "input-package": ({'task_id','scope_version','claim_id'}, whole_query, "application/zip", False),
+    "execution": ({'task_id', 'claim_id', 'action_id', 'executor_id'}, whole_query, JSON, False),
+    "input-package": ({'task_id', 'scope_version', 'claim_id'}, whole_query, "application/zip", False),
     "release-readiness": (None, None, JSON, False),
     "window-impact": ({"name"}, one_value("name"), JSON, False),
     "capability-requests": (None, None, JSON, False),
-    "tasks": ({"project",'full'}, listing_query, JSON, False),
-    "task-options": ({"project",'full'}, listing_query, JSON, False),
+    "tasks": ({"project", 'full'}, listing_query, JSON, False),
+    "task-options": ({"project", 'full'}, listing_query, JSON, False),
     "board": (None, None, "text/markdown; charset=utf-8", False),
     "projects": (None, None, JSON, False),
     "executors": (None, None, JSON, False),
@@ -189,7 +190,7 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if self.command != "HEAD":
                 if streaming:
-                    while chunk := payload.read(1024*1024):
+                    while chunk := payload.read(1024 * 1024):
                         self.wfile.write(chunk)
                 else:
                     self.wfile.write(payload)
@@ -228,22 +229,23 @@ class Handler(BaseHTTPRequestHandler):
 
     def discard_unadmitted_body(self):
         """Bounded drain avoids resetting a TLS response over an unread small POST body."""
-        lengths=self.headers.get_all('Content-Length',[])
-        if (self.command!='POST' or len(lengths)!=1 or not lengths[0].isascii() or
-                not lengths[0].isdigit() or len(lengths[0])>10 or self.headers.get('Transfer-Encoding')):
+        lengths = self.headers.get_all('Content-Length', [])
+        if (self.command != 'POST' or len(lengths) != 1 or not lengths[0].isascii() or
+                not lengths[0].isdigit() or len(lengths[0]) > 10 or self.headers.get('Transfer-Encoding')):
             return
-        remaining=int(lengths[0])
-        if remaining>MAX_JSON:
+        remaining = int(lengths[0])
+        if remaining > MAX_JSON:
             return
-        previous=self.connection.gettimeout()
-        deadline=time.monotonic()+2
+        previous = self.connection.gettimeout()
+        deadline = time.monotonic() + 2
         try:
-            while remaining and time.monotonic()<deadline:
-                self.connection.settimeout(max(0.01,deadline-time.monotonic()))
-                chunk=self.rfile.read1(min(65536,remaining))
-                if not chunk:break
-                remaining-=len(chunk)
-        except (OSError,TimeoutError):
+            while remaining and time.monotonic() < deadline:
+                self.connection.settimeout(max(0.01, deadline - time.monotonic()))
+                chunk = self.rfile.read1(min(65536, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+        except (OSError, TimeoutError):
             pass
         finally:
             self.connection.settimeout(previous)
@@ -260,7 +262,7 @@ class Handler(BaseHTTPRequestHandler):
                 with service.lock, service.one_snapshot():
                     return web.dispatch(self, method, target)
             with service.request_identity(lambda: self.server.sessions.actor(web.session_id(self), service),
-                                          lambda: getattr(self,'web_supersedes_request_id',None)):
+                                          lambda: getattr(self, 'web_supersedes_request_id', None)):
                 return web.dispatch(self, method, target)
         if self.server.tls and method == "GET" and self.path == "/healthz":
             with service.lock:
@@ -367,10 +369,10 @@ class Handler(BaseHTTPRequestHandler):
                     return
             except Maintenance as error:
                 self.discard_unadmitted_body()
-                if self.headers.get('X-TaskPool-Response')=='json':
-                    self.send(503,{'status':503,'state':'pending','received':False,'retryable':True,
-                              'message':'服务正在维护，请保留原输入和请求编号稍后重试'},
-                              headers=(('Retry-After',str(error.retry_after)),))
+                if self.headers.get('X-TaskPool-Response') == 'json':
+                    self.send(503, {'status': 503, 'state': 'pending', 'received': False, 'retryable': True,
+                              'message': '服务正在维护，请保留原输入和请求编号稍后重试'},
+                              headers=(('Retry-After', str(error.retry_after)),))
                     return
                 if web.matches(urlsplit(self.path)):
                     status, payload, kind, headers = web.html_page("服务正在升级", "<main><h1>服务暂时重连</h1>"
@@ -395,8 +397,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             except Exception as error:
                 from .privacy import log_exception
-                incident=log_exception(error)
-                self.send(503, {"status": "pending", "message": "操作状态待核，修复后重试同一请求", "incident":incident})
+                incident = log_exception(error)
+                self.send(503, {"status": "pending", "message": "操作状态待核，修复后重试同一请求", "incident": incident})
                 return
         except (ConnectionError, TimeoutError):
             pass  # The request may already be durable; the client can retry the same id.
@@ -499,19 +501,19 @@ def download_inputs(handler, target):
     """Stream the frozen inputs of a task; credentials and the selection are checked again after packing."""
     from .input_packages import select, generate
     service = handler.server.service
-    query = parse_query(target.query, {'task_id','scope_version','claim_id'})
+    query = parse_query(target.query, {'task_id', 'scope_version', 'claim_id'})
     with service.lock:
         actor = handler.authenticate()
-        selected = select(service,actor,service.snapshot()['state'],query)
+        selected = select(service, actor, service.snapshot()['state'], query)
         version = service.credential_version(actor)
-    stream, manifest_sha = generate(service,actor,selected)
+    stream, manifest_sha = generate(service, actor, selected)
     try:
         with service.lock:
             if handler.authenticate() != actor or service.credential_version(actor) != version:
-                raise ClientError('下载期间凭据已变化，请重新核对',401)
-            if select(service,actor,service.snapshot()['state'],query) != selected:
-                raise ClientError('下载期间冻结输入已变化，原文件保留',409)
-        return 200, stream, 'application/zip', (('X-TaskPool-Manifest-SHA256',manifest_sha),)
+                raise ClientError('下载期间凭据已变化，请重新核对', 401)
+            if select(service, actor, service.snapshot()['state'], query) != selected:
+                raise ClientError('下载期间冻结输入已变化，原文件保留', 409)
+        return 200, stream, 'application/zip', (('X-TaskPool-Manifest-SHA256', manifest_sha),)
     except BaseException:
         stream.close()
         raise

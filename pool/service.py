@@ -27,8 +27,8 @@ import 协作升级 as rules
 
 PUBLIC_ACTIONS = {"register", "claim", "handoff", "deliver", "deliver-files", "stop",
                   "return", "resume", "review", "close", "cancel", "withdraw"} | upgrade.ACTIONS | round_service.PUBLIC | {
-                    'context-save','segment-open','action-prepare','resource-request','resource-cancel','action-start',
-                    'execution-fact','evidence-stash','resource-release'}
+                    'context-save', 'segment-open', 'action-prepare', 'resource-request', 'resource-cancel', 'action-start',
+                    'execution-fact', 'evidence-stash', 'resource-release'}
 
 
 @contextmanager
@@ -177,6 +177,7 @@ class Service:
             inherited = getattr(self.pinned, "authentication", None)
             if authorize is None and inherited and inherited[0] == actor:
                 authorize = inherited[1]
+
             def authenticate_current():
                 if authorize is not None and authorize() != actor:
                     raise ClientError("身份或凭据已变化，请重新登录后查询原请求", 401)
@@ -195,10 +196,10 @@ class Service:
                     access = self.receipt_authorization(actor, key)
                     response = json.loads(row[2])
                     return row[1], self.cleanup_receipt(response) if access == "cleanup" else self.credential_result(key, action, response)
-                if self.db.execute('SELECT 1 FROM request_quarantine WHERE key=?',(key,)).fetchone():
-                    self.receipt_authorization(actor,key)
-                    return 202, {'status':'pending','request_id':request_id,'requires_reconciliation':True,
-                                 'message':'原请求需要有权人员核对；已完成事实和原输入均保留'}
+                if self.db.execute('SELECT 1 FROM request_quarantine WHERE key=?', (key,)).fetchone():
+                    self.receipt_authorization(actor, key)
+                    return 202, {'status': 'pending', 'request_id': request_id, 'requires_reconciliation': True,
+                                 'message': '原请求需要有权人员核对；已完成事实和原输入均保留'}
                 if not self.recover():
                     return 202, {"status": "pending", "request_id": request_id}
                 authenticate_current()
@@ -232,12 +233,12 @@ class Service:
                                     (key, fingerprint, actor, action, encoded(body), encoded(plan), None, None))
                     self.record_request(key, actor, action, body, fingerprint, snap["state"], plan, reported_utc)
                     if supersedes is not None:
-                        old_key=digest(encoded([actor,supersedes]))
-                        if self.db.execute('SELECT 1 FROM request_quarantine WHERE key=?',(old_key,)).fetchone():
-                            response={'status':'rejected','request_id':supersedes,'superseded_by':request_id,
-                                      'message':'原请求隔离后由关联新请求接续；已完成事实和原输入保留','quarantined':True}
+                        old_key = digest(encoded([actor, supersedes]))
+                        if self.db.execute('SELECT 1 FROM request_quarantine WHERE key=?', (old_key,)).fetchone():
+                            response = {'status': 'rejected', 'request_id': supersedes, 'superseded_by': request_id,
+                                      'message': '原请求隔离后由关联新请求接续；已完成事实和原输入保留', 'quarantined': True}
                             self.db.execute('UPDATE requests SET status=409,response=? WHERE key=? AND status IS NULL',
-                                            (encoded(response),old_key))
+                                            (encoded(response), old_key))
             return self.execute(key)
 
     def record_request(self, key, actor, action, body, fingerprint, state, plan=None, reported_utc=None):
@@ -246,10 +247,11 @@ class Service:
         task, project = task or real_task, real_project or project
         from . import execution
         if action in execution.ACTIONS:
-            binding=execution._binding(state,action,body)
-            resolved_task=state['tasks'].get(binding.get('task_id'))
+            binding = execution._binding(state, action, body)
+            resolved_task = state['tasks'].get(binding.get('task_id'))
             if resolved_task:
-                task=resolved_task['task_id'];project=rules.task_project(resolved_task)
+                task = resolved_task['task_id']
+                project = rules.task_project(resolved_task)
         subject = rules.identity(state, actor) or {}
         details = {"schema": state["pilot"].get("format", {}).get("schema", rules.VERSION),
                    "actor": actor, "identity_kind": subject.get("kind"),
@@ -259,27 +261,27 @@ class Service:
                    "credential_version": subject.get("credential"),
                    "authorization": rules.auth_stamp(state, actor, project), "project_id": project,
                    "task_id": task, "request_id": body["request_id"], "fingerprint": fingerprint,
-                   'claim_id':body.get('claim_id'), 'action_id':body.get('action_id'),
+                   'claim_id': body.get('claim_id'), 'action_id': body.get('action_id'),
                    "received_utc": rules.utc(), "reported_utc": reported_utc, "operation": action,
                    "reason": body.get("reason") if isinstance(body.get("reason"), str) else None}
         if body.get('supersedes_request_id'):
             details['supersedes_request_id'] = body['supersedes_request_id']
         details.update(delegation.stamp(state, actor, project))
-        if security_schema(state)>=5 and action in PUBLIC_ACTIONS:
+        if security_schema(state) >= 5 and action in PUBLIC_ACTIONS:
             from 协作执行 import default_context
-            selected=default_context(state,actor)
-            data=state['security'].get('execution',{})
-            action_row=data.get('actions',{}).get(body.get('action_id'),{})
-            segment=data.get('segments',{}).get(body.get('segment_id') or action_row.get('segment_id'),{})
-            cid=body.get('context_id') or segment.get('context_id')
-            cversion=body.get('context_version') or segment.get('context_version')
+            selected = default_context(state, actor)
+            data = state['security'].get('execution', {})
+            action_row = data.get('actions', {}).get(body.get('action_id'), {})
+            segment = data.get('segments', {}).get(body.get('segment_id') or action_row.get('segment_id'), {})
+            cid = body.get('context_id') or segment.get('context_id')
+            cversion = body.get('context_version') or segment.get('context_version')
             if cid and cversion:
-                selected=data.get('contexts',{}).get(str(cid)+':'+str(cversion),selected)
-            details.update(source_platform=subject.get('platform'),execution_context=selected,
-                           model=selected.get('config',{}).get('model'),platform=selected.get('config',{}).get('platform'))
-            if action in {'execution-fact','evidence-stash'} and not body.get('action_id'):
-                details['reporter_context']=details.pop('execution_context')
-                details['original_execution_context']='unknown'
+                selected = data.get('contexts', {}).get(str(cid) + ':' + str(cversion), selected)
+            details.update(source_platform=subject.get('platform'), execution_context=selected,
+                           model=selected.get('config', {}).get('model'), platform=selected.get('config', {}).get('platform'))
+            if action in {'execution-fact', 'evidence-stash'} and not body.get('action_id'):
+                details['reporter_context'] = details.pop('execution_context')
+                details['original_execution_context'] = 'unknown'
         self.db.execute("INSERT INTO request_context VALUES(?,?)", (key, encoded(details)))
 
     def credential_result(self, key, action, response):
@@ -305,7 +307,7 @@ class Service:
         if details.get("operation") in {"stop", "handoff"} and any(
                 c["origin"] == actor and c["task_id"] == details.get("task_id") for c in state["claims"].values()):
             return "cleanup"
-        if details.get('operation') in {'execution-fact','evidence-stash','resource-release','resource-cancel'}:
+        if details.get('operation') in {'execution-fact', 'evidence-stash', 'resource-release', 'resource-cancel'}:
             return 'cleanup'
         raise ClientError("项目请求不存在或已无查看授权", 404)
 
@@ -398,10 +400,10 @@ class Service:
         return snap, {key: terminal[key] for key in ("result", "reason", "ledger_seq", "sha256")}
 
     def ledger_decide(self, state, env, context):
-        pending=self.db.execute('SELECT s.envelope FROM steps s JOIN request_quarantine q ON q.key=s.request_key').fetchall()
-        if any((prior:=json.loads(row[0])).get('event_id')==env.get('event_id') and
-               prior.get('origin_id')==env.get('origin_id') and digest(encoded(prior))==digest(encoded(env)) for row in pending):
-            raise Rejected('原请求已隔离，须经关联新请求按当前授权接续；旧信封不重放','intent-final')
+        pending = self.db.execute('SELECT s.envelope FROM steps s JOIN request_quarantine q ON q.key=s.request_key').fetchall()
+        if any((prior := json.loads(row[0])).get('event_id') == env.get('event_id') and
+               prior.get('origin_id') == env.get('origin_id') and digest(encoded(prior)) == digest(encoded(env)) for row in pending):
+            raise Rejected('原请求已隔离，须经关联新请求按当前授权接续；旧信封不重放', 'intent-final')
         context['phase'] = self.lifecycle.status()['phase']
         context.update(self.desk.evidence_context(env, state))
         return upgrade.decide(state, env, context)

@@ -43,7 +43,7 @@ def write_json(path, value):
 
 def source_files(root):
     """Only source, bundled documentation and test helpers; no local stores or output."""
-    paths = [root / name for name in (".gitignore", "README.md", "LICENSE", "build.py", "taskpool.py", "Containerfile") if (root/name).exists()]
+    paths = [root / name for name in (".gitignore", "README.md", "LICENSE", "build.py", "taskpool.py", "Containerfile") if (root / name).exists()]
     paths += list(root.glob("verify*.py")) + list(root.glob("verify*.js"))
     for folder, suffixes in SOURCE_SUFFIXES.items():
         paths += [path for path in (root / folder).rglob("*") if path.suffix.lower() in suffixes]
@@ -82,7 +82,7 @@ def selected_tests(suite, only):
         return list(FAST if suite == "fast" else RELEASE)
     names = [name.removesuffix(".py").removesuffix('.js') for item in only for name in item.split(",") if name]
     unknown = {name for name in names if name not in KNOWN and not (
-        re.fullmatch(r'verify_[A-Za-z0-9_]+',name) and any((ROOT/(name+ext)).is_file() for ext in ('.py','.js')))}
+        re.fullmatch(r'verify_[A-Za-z0-9_]+', name) and any((ROOT / (name + ext)).is_file() for ext in ('.py', '.js')))}
     if unknown:
         raise ValueError("未知验证项：" + ", ".join(sorted(unknown)))
     result = list(dict.fromkeys(names))
@@ -110,11 +110,11 @@ def check_output(root, output):
 
 
 def command_for(name, candidate, report):
-    if (candidate/(name+'.js')).is_file():
-        node=shutil.which('node')
+    if (candidate / (name + '.js')).is_file():
+        node = shutil.which('node')
         if not node:
             raise ValueError('JavaScript 必验项需要可用 node，不能跳过计为通过')
-        return [node,str(candidate/(name+'.js'))]
+        return [node, str(candidate / (name + '.js'))]
     command = [sys.executable, "-B", "-X", "utf8", str(candidate / ("build.py" if name == "build" else name + ".py"))]
     if name in REPORTS:
         command += ["--report", str(report)]

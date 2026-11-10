@@ -67,14 +67,14 @@ def dispatch(handler, method, target, actor):
     from .web import parse_form, same_origin, reauthenticate
     service = handler.server.service
     if method == 'POST' and not same_origin(handler):
-        raise ClientError('请从当前账号项目页面提交',403)
-    parse_error=None
+        raise ClientError('请从当前账号项目页面提交', 403)
+    parse_error = None
     try:
-        posted = parse_form(handler,8192,6) if method == 'POST' else None
+        posted = parse_form(handler, 8192, 6) if method == 'POST' else None
     except ClientError as error:
-        posted,parse_error=None,error
+        posted, parse_error = None, error
     with service.lock:
-        reauthenticate(handler,actor)
+        reauthenticate(handler, actor)
         state = service.snapshot()["state"]
         if not rules.system_admin(state, actor):
             raise ClientError("仅系统管理员可调整账号项目", 403)
@@ -87,7 +87,8 @@ def dispatch(handler, method, target, actor):
         message, status, attempted = "", 200, None
         if method == "POST":
             try:
-                if parse_error:raise parse_error
+                if parse_error:
+                    raise parse_error
                 data = posted
                 attempted = dict(data)
                 operation = data.pop("operation", "")

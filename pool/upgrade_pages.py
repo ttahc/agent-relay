@@ -128,8 +128,7 @@ def executor_index(actor, profile, sources, round_mode=False):
     register = ""
     if (profile["binding"] or {}).get("kind") == "human" and profile["projects"]:
         register = '<a class="primary" href="/invitations">邀请 AI 窗口</a>' if round_mode else block(
-                         "登记新窗口", pages.form("executor-enroll", "登记窗口", contents=
-                         selection("project_id", "项目", project_options(profile["projects"]))
+                         "登记新窗口", pages.form("executor-enroll", "登记窗口", contents=selection("project_id", "项目", project_options(profile["projects"]))
                          + input_field("roles", "角色（executor 或 receiver，可逗号分隔）", "executor") + source_fields()))
     return panel(actor, "窗口目录", f'<ul class="roster">{rows}</ul>{register}')
 
@@ -141,6 +140,7 @@ def executor_page(actor, item):
               "claimed": "待开始", "intent": "工作中", "started": "已开始", "working": "工作中", "waiting": "等待输入",
               "error": "出错", "finished": "已结束", "stopped": "已停止", "unknown": "待核实", "pending": "待确认",
               "not_started": "未开始", "ended": "已结束", "disabled": "已停用", "paused": "已暂停", "expired": "已过期"}
+
     def state(value):
         return escape(states.get(value, "待核实（" + str(value or "未回报") + "）"))
     link = f'<p><a href="{escape(item["url"], quote=True)}" rel="noreferrer noopener">打开对应窗口</a></p>' if item.get("url") else ""
@@ -167,8 +167,7 @@ def executor_page(actor, item):
         contact = {"stale": "联系异常，执行状态待核", "current": "近期有心跳", "unconfirmed": "心跳未确认"}
         update += f'<p>{contact.get(item["contact"], "心跳待核实")} · 并发上限 {item["concurrency"]}</p>'
     if item["executor_id"] == actor:
-        update += block("更新窗口名称与会话资料", pages.form("executor-sync", "保存窗口资料", contents=
-                       input_field("window_name", "窗口名称（当前聊天标题）", item.get("window_name") or "", required=False)
+        update += block("更新窗口名称与会话资料", pages.form("executor-sync", "保存窗口资料", contents=input_field("window_name", "窗口名称（当前聊天标题）", item.get("window_name") or "", required=False)
                        + input_field("session", "平台会话标识", item["session"])
                        + input_field("model", "模型", item["model"]) + input_field("environment", "环境", item["environment"])))
     project_links = (f'<a class="secondary" href="/accounts/projects?{urlencode({"identity": item["executor_id"]})}">调整项目授权</a>'
@@ -329,8 +328,7 @@ def release_page(actor, data):
     record = escape(json.dumps(release, ensure_ascii=False, indent=2))
     controls = ""
     if "receiver" in data["roles"] and release["status"] in {"pending", "invalid"}:
-        controls += block("独立验收", pages.form("release-accept", "提交验收", contents=
-                          text_field("reason", "验收依据") + text_field("report", "验收报告 JSON", size=256000)))
+        controls += block("独立验收", pages.form("release-accept", "提交验收", contents=text_field("reason", "验收依据") + text_field("report", "验收报告 JSON", size=256000)))
     if "manager" in data["roles"] and release["status"] == "accepted":
         controls += pages.form("release-close", "关闭本次升级验收", {"acceptance": release["acceptance"]}, text_field("reason", "收口依据"))
     if "manager" in data["roles"] and release["status"] in {"accepted", "closed"}:

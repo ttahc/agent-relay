@@ -37,7 +37,7 @@ def render(actor, state, name, message="", status=200, draft=None):
               key != "identity:" + impact["owner"]]
     fixed = pages.hidden("name", name) + pages.hidden("version", impact["version"])
     form = (ui.selection("operation", "处置方式", list(LABELS.items()), draft.get("operation", "pause"))
-            + ui.selection("owner", "新责任人（仅更换责任人时使用）", [("", "请选择")]+humans, draft.get("owner", ""))
+            + ui.selection("owner", "新责任人（仅更换责任人时使用）", [("", "请选择")] + humans, draft.get("owner", ""))
             + ui.text_field("reason", "处置依据", draft.get("reason", "")))
     notice = f'<p role="status">{escape(message)}</p>' if message else ""
     body = (window_tabs("/executors") + f'<h2>{escape(impact.get("window_name") or impact.get("window") or name)}：处置影响</h2>'
@@ -64,14 +64,14 @@ def dispatch(handler, method, target, actor):
         raise ClientError("窗口处置页面路径或方法无效", 405)
     name, service = match[1], handler.server.service
     if method == 'POST' and not same_origin(handler):
-        raise ClientError('请从当前窗口处置页面提交',403)
-    parse_error=None
+        raise ClientError('请从当前窗口处置页面提交', 403)
+    parse_error = None
     try:
-        posted=parse_form(handler,8192,7) if method=='POST' else None
+        posted = parse_form(handler, 8192, 7) if method == 'POST' else None
     except ClientError as error:
-        posted,parse_error=None,error
+        posted, parse_error = None, error
     with service.lock:
-        reauthenticate(handler,actor)
+        reauthenticate(handler, actor)
         state = service.snapshot()["state"]
         window_admin.view(state, actor, name)
         message, status, draft = "", 200, None
@@ -79,7 +79,8 @@ def dispatch(handler, method, target, actor):
             if not same_origin(handler):
                 raise ClientError("请从当前窗口处置页面提交", 403)
             try:
-                if parse_error:raise parse_error
+                if parse_error:
+                    raise parse_error
                 draft = posted
                 from .packages import fields
                 fields(draft, "request_id name version operation owner reason")

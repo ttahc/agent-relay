@@ -134,7 +134,7 @@ def build_parser():
     maintenance.add_argument("--request-id", required=True)
     commands.add_parser("inspect-store", help="独占检查数据合同、任务和待恢复请求")
     safety_migrate = commands.add_parser('security-migrate', help='独占迁移安全语义3→4→5，保留活动任务及待处置请求')
-    safety_migrate.add_argument('--target', type=int, choices=[4,5], default=5)
+    safety_migrate.add_argument('--target', type=int, choices=[4, 5], default=5)
     safety_migrate.add_argument('--request-id', required=True)
     control = commands.add_parser("upgrade-control", help="认证本机管理接口，不打开第二个账本写实例")
     control.add_argument("command", choices=["status", "drain", "freeze", "cancel", "shutdown", "backup"])
@@ -215,7 +215,7 @@ def round_migrate(args, service):
 
 def security_migrate(args, service):
     from pool.safety import migrate
-    status,result=migrate(service,args.target,args.request_id)
+    status, result = migrate(service, args.target, args.request_id)
     emit(result)
     return 0 if status == 200 else 1
 
@@ -259,12 +259,13 @@ def serve(args, service, config, store):
         fingerprint = digest(ssl.PEM_cert_to_DER_cert(pem + "-----END CERTIFICATE-----"))
     with Server(args.port, service, config["tokens"], tls, args.lan_name, args.lan_alias, fingerprint) as server:
         from pool.safety import record_configuration
-        record_configuration(service, {'service_version':__version__, 'port':server.server_address[1],
-            'lan_name':args.lan_name, 'lan_aliases':args.lan_alias,
-            'tls_cert':str(args.tls_cert) if args.tls_cert else None,
-            'tls_key':str(args.tls_key) if args.tls_key else None,
-            'launch_config_sha256':os.environ.get('TASKPOOL_LAUNCH_CONFIG_SHA256')})
+        record_configuration(service, {'service_version': __version__, 'port': server.server_address[1],
+            'lan_name': args.lan_name, 'lan_aliases': args.lan_alias,
+            'tls_cert': str(args.tls_cert) if args.tls_cert else None,
+            'tls_key': str(args.tls_key) if args.tls_key else None,
+            'launch_config_sha256': os.environ.get('TASKPOOL_LAUNCH_CONFIG_SHA256')})
         scheme, host = ("https", args.lan_name) if tls else ("http", "127.0.0.1")
+
         def graceful_shutdown():
             service.lifecycle.drain()
             try:
@@ -276,6 +277,7 @@ def serve(args, service, config, store):
                 server.shutdown()
             else:
                 print("排空超时，已取消停服，请检查升级控制状态", file=sys.stderr, flush=True)
+
         def on_signal(_number, _frame):
             threading.Thread(target=graceful_shutdown, name="graceful-stop", daemon=True).start()
         signals = {kind: signal.getsignal(kind) for kind in (signal.SIGTERM, signal.SIGINT)}
@@ -295,10 +297,10 @@ def serve(args, service, config, store):
 def run_with_service(args, service, config, store):
     """Everything that needs the opened ledger: recover pending requests, then run the command."""
     state = service.snapshot()['state']
-    if (args.action=='serve' and state.get('pilot',{}).get('format',{}).get('schema',0) in {3,4}
-            and (args.port!=0 or args.lan_name)):
-        raise ClientError('启动新版服务前须先独占运行 security-migrate --target 5 --request-id <稳定编号>',409)
-    if args.action not in {'security-migrate','inspect-store'} and not service.recover():
+    if (args.action == 'serve' and state.get('pilot', {}).get('format', {}).get('schema', 0) in {3, 4}
+            and (args.port != 0 or args.lan_name)):
+        raise ClientError('启动新版服务前须先独占运行 security-migrate --target 5 --request-id <稳定编号>', 409)
+    if args.action not in {'security-migrate', 'inspect-store'} and not service.recover():
         raise Unavailable("有未得到终局决定的请求")
     state = service.snapshot()["state"]
     if any(role not in state["origins"].get(name, {}).get("roles", []) for name, role in config["roles"].items()):

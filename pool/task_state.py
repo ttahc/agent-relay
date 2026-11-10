@@ -23,21 +23,22 @@ def active_claim(state, task):
 
 
 def execution_status(state, claim):
-    if not state or not claim or security_schema(state)<5:
+    if not state or not claim or security_schema(state) < 5:
         return None
-    data=state['security'].get('execution',{})
-    all_rows=[row for row in data.get('actions',{}).values() if row.get('claim_id')==claim['claim_id']]
-    rows=[row for row in all_rows if row.get('epoch')==claim['epoch'] and row.get('scope_version')==claim['W']['scope']]
-    historical=[row for row in all_rows if row not in rows]
-    if not all_rows and claim['claim_id'] not in data.get('claim_bindings',{}):
+    data = state['security'].get('execution', {})
+    all_rows = [row for row in data.get('actions', {}).values() if row.get('claim_id') == claim['claim_id']]
+    rows = [row for row in all_rows if row.get('epoch') == claim['epoch'] and row.get('scope_version') == claim['W']['scope']]
+    historical = [row for row in all_rows if row not in rows]
+    if not all_rows and claim['claim_id'] not in data.get('claim_bindings', {}):
         return None
-    unknown=sum(row.get('state')=='unconfirmed' or row.get('state') in {'finished','error','stopped'} and
-                data.get('grants',{}).get(row.get('grant_id'),{}).get('physical') in {'in-use','unknown'} for row in rows)
-    return {'actions':len(rows),'running':sum(row['state']=='running' for row in rows),
-            'awaiting_start':sum(row['state']=='start-authorized' for row in rows),
-            'unconfirmed':unknown,'finished':sum(row['state'] in {'finished','error','stopped','not-started'} for row in rows),
-            'historical_live':sum(row['state'] in {'running','start-authorized','unconfirmed'} for row in historical),
-            'historical_unconfirmed':sum(row['state']=='unconfirmed' or data.get('grants',{}).get(row.get('grant_id'),{}).get('physical') in {'in-use','unknown'} for row in historical)}
+    unknown = sum(row.get('state') == 'unconfirmed' or row.get('state') in {'finished', 'error', 'stopped'} and
+                data.get('grants', {}).get(row.get('grant_id'), {}).get('physical') in {'in-use', 'unknown'} for row in rows)
+    return {'actions': len(rows), 'running': sum(row['state'] == 'running' for row in rows),
+            'awaiting_start': sum(row['state'] == 'start-authorized' for row in rows),
+            'unconfirmed': unknown, 'finished': sum(row['state'] in {'finished', 'error', 'stopped', 'not-started'} for row in rows),
+            'historical_live': sum(row['state'] in {'running', 'start-authorized', 'unconfirmed'} for row in historical),
+            'historical_unconfirmed': sum(row['state'] == 'unconfirmed' or data.get('grants', {}).get(row.get('grant_id'), {}).get('physical') in {'in-use', 'unknown'} for row in historical)}
+
 
 def stage(task, claim, state=None):
     if claim and claim.get("recovery", {}).get("status") == "pending":
@@ -49,10 +50,12 @@ def stage(task, claim, state=None):
             return "handoff_pending"
         if claim["E"].get("reason") == "pause" and claim["W"]["state"] in {"draft", "revision"}:
             return "paused"
-        current=execution_status(state,claim)
-        if current is not None and claim['W']['state'] not in {'review','revision','complete'}:
-            if current['unconfirmed']:return 'recovery'
-            if current['running'] or current['finished']:return 'running'
+        current = execution_status(state, claim)
+        if current is not None and claim['W']['state'] not in {'review', 'revision', 'complete'}:
+            if current['unconfirmed']:
+                return 'recovery'
+            if current['running'] or current['finished']:
+                return 'running'
             return 'claimed'
         return {"review": "review", "revision": "revision", "complete": "accepted"}.get(
             claim["W"]["state"], "claimed" if claim.get("run", {}).get("state") == "claimed" else "running")
