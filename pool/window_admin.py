@@ -4,6 +4,7 @@ import time
 
 from .packages import ClientError, fields, string
 from .constants import COORDINATOR, step
+from .task_state import security_schema
 from .upgrade import identifier, sha256, version
 import 协作升级 as rules
 
@@ -13,7 +14,7 @@ OPERATIONS = {"transfer", "disable", "pause", "archive", "revoke-all"}
 
 
 def _cap_context(state, actor, record, values=None, create=False, now=0, event_id="capability-context"):
-    if state.get("security", {}).get("schema", 3) < 5:
+    if security_schema(state, 3) < 5:
         return {}
     import 协作执行 as execution
     values = values or record
@@ -47,7 +48,7 @@ def reviewers(state, project, name):
 
 
 def _execution_occupancies(state,name):
-    if state.get('security',{}).get('schema',0)<5:
+    if security_schema(state)<5:
         return []
     from 协作执行 import blocking_records
     claims={key for key,row in state.get('claims',{}).items() if row.get('origin')==name}
@@ -184,7 +185,7 @@ def capability_action(state, p, actor, now, event_id):
         evidence = record.get("evidence", {})
         rules.require(isinstance(evidence, dict) and isinstance(evidence.get("sha256"), str) and rules.SHA.fullmatch(evidence["sha256"]) and
                       isinstance(evidence.get("note"), str) and 0 < len(evidence["note"].strip()) <= 2000, "须提供证据说明和 SHA256")
-        is_v5 = state.get("security", {}).get("schema", 3) >= 5
+        is_v5 = security_schema(state, 3) >= 5
         rules.require(is_v5 or record["kind"] != "environment" or record["environment"] == subject.get("environment", "human"),
                       "环境证据与当前窗口环境不符")
         capkey = f"cap:{project}:{name}:{p['capability']}"
@@ -204,7 +205,7 @@ def capability_action(state, p, actor, now, event_id):
     if p["decision"] == "approve":
         subject = rules.identity(state, request["name"]) or {}
         record = request["record"]
-        is_v5 = state.get("security", {}).get("schema", 3) >= 5
+        is_v5 = security_schema(state, 3) >= 5
         if is_v5:
             import 协作执行 as execution
             selected = execution.context_record(state, request["name"], {"context_id": record["context_id"], "version": record["context_version"]})

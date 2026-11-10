@@ -9,6 +9,7 @@ import zipfile
 
 from .packages import ClientError, MAX_EXPANDED, MAX_FILES, MAX_PACKAGE, artifact_name, fields, string
 from .constants import COORDINATOR, step
+from .task_state import security_schema
 from .upgrade import identifier, version
 from . import delegation
 import 协作执行 as engine
@@ -180,7 +181,7 @@ def plan(service, actor, action, key, body, state):
 
 
 def features(state):
-    schema = state.get("security", {}).get("schema", 3)
+    schema = security_schema(state, 3)
     ready = state.get("security", {}).get("phase", "ready") == "ready"
     operations = ACTIONS if schema == 5 and ready else engine.FACT_OPS if schema == 4 and ready else []
     return {"api_protocol": 1, "security_schema": schema, "execution_protocol": 5 if schema == 5 and ready else None,
@@ -227,7 +228,7 @@ def read(state, actor, query=None):
             key == "action_id" and row.get("id") == selected_action.get("segment_id")
             for key in ("task_id", "claim_id", "action_id")) and (bool(query) or
                 row.get("executor_id", state.get("claims", {}).get(row.get("claim_id"), {}).get("origin")) == actor)
-    result = {"schema": state.get("security", {}).get("schema", 3), "actor": actor, "executor_id": target,
+    result = {"schema": security_schema(state, 3), "actor": actor, "executor_id": target,
               "can_write": actor == target, "default_context": deepcopy(data.get("defaults", {}).get(target)) if can_profile else None,
               "contexts": [{**row, "can_write": actor == row["executor_id"]} for row in contexts]}
     result["resource_domains"] = sorted(getattr(query, "resource_domains", []))

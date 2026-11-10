@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 
 from .packages import ClientError, fields, integer, string
 from .constants import ADMIN, COORDINATOR, step
+from .task_state import security_schema
 import 协作升级 as rules
 from 协作存储 import digest, encoded
 
@@ -263,7 +264,7 @@ def plan(service, actor, action, key, body, snap):
         fields(evidence, "note sha256")
         evidence = {"note": string(evidence["note"], "证据说明"), "sha256": evidence["sha256"]}
         if body["level"] in {"verified", "probed"}:
-            if state.get('security',{}).get('schema',0)>=5 and (rules.identity(state,actor) or {}).get('kind')!='human':
+            if security_schema(state)>=5 and (rules.identity(state,actor) or {}).get('kind')!='human':
                 raise ClientError('探测或核实等级须由有项目授权的人类办理；AI不能借旧接口相互核实',403)
             sha256(evidence["sha256"])
         elif evidence["sha256"]:
@@ -271,14 +272,14 @@ def plan(service, actor, action, key, body, snap):
         elif evidence["sha256"] != "":
             raise ClientError("证据指纹格式无效")
         environment = string(body["environment"], "环境标识", 160)
-        if state.get('security',{}).get('schema',0)<5 and body["kind"] == "environment" and environment != (rules.identity(state, name) or {}).get("environment", "human"):
+        if security_schema(state)<5 and body["kind"] == "environment" and environment != (rules.identity(state, name) or {}).get("environment", "human"):
             raise ClientError("证据与执行端登记的环境不一致")
         payload = {"op": "capability", "project_id": project,
                    "name": name, "id": capability, "version": version(body["version"]), "record": {
                        "kind": body["kind"], "value": string(body["value"], "能力值", 100).strip(), "level": body["level"],
                        "evidence": evidence, "environment": environment, "expires": body["expires"],
                    }}
-        if state.get('security',{}).get('schema',0)>=5:
+        if security_schema(state)>=5:
             from 协作执行 import bind_evidence, context_record
             selected=context_record(state,name,{'context_id':body['context_id'],'version':body['context_version']}) if body.get('context_id') else None
             payload['record'].update(bind_evidence(state,name,payload['record'],selected,project,capability,
