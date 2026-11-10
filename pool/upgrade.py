@@ -8,6 +8,8 @@ from urllib.parse import urlsplit
 from .packages import ClientError, fields, integer, string
 from .constants import ADMIN, COORDINATOR, step
 from .task_state import security_schema
+from 协作执行 import bind_evidence, context_record
+from 协作本轮 import DEFAULT_POLICY
 import 协作升级 as rules
 from 协作存储 import digest, encoded
 
@@ -118,236 +120,305 @@ def scope_contract(state, body, task_id=None):
     return spec, rules.dependency_rows(state, body["dependencies"], spec["project_id"], task_id), rules.resources(body["resources"])
 
 
+SCOPE_FIELDS = "project_id iteration delivery requirements review_mode user_basis resources dependencies"
+MAINTENANCE_ACTIONS = {"maintenance-mode", "identity-bind", "project-save", "project-grant"}  # allowed during maintenance
+
+
+class Operation:
+    """One pilot step being prepared.
+
+    A planner returns the step's payload.  It may also add expectations, name a file to
+    store with the step, and add fields to the plan itself through ``result``.
+    """
+
+    def __init__(self, service, actor, action, key, body, state, expects):
+        self.service, self.actor, self.action, self.key, self.body = service, actor, action, key, body
+        self.state, self.expects = state, expects
+        self.result = {}
+        self.file = None
+
+
 def plan(service, actor, action, key, body, snap):
     state = snap["state"]
     expects = {"generation": state["generation"]}
-    result = {}
-    file = None
     if action == 'security-migrate':
         fields(body, 'request_id target')
         if actor != ADMIN or body['target'] not in (4, 5):
             raise ClientError('须由本机管理员按 4／5 顺序迁移安全语义', 403)
         return {'steps': [step(COORDINATOR, 'pilot', {'op': action, 'target': body['target'],
                          'source_head':snap['head'],'source_sha256':snap.get('sha256')}, expects)]}
-    scope_fields = "project_id iteration delivery requirements review_mode user_basis resources dependencies"
     if action == "upgrade-migrate":
-        fields(body, "request_id task_id version scope_version upgrade image")
-        if actor != ADMIN:
-            raise ClientError("迁移须由本机管理员入口办理", 403)
-        task_id = identifier(body["task_id"], "任务号")
-        image = sha256(body["image"])
-        requirements = [
-            {"id": name, "kind": kind, "value": "*", "required": True, "evidence": level}
-            for name, kind, level in (
-                ("workflow-design", "skill", "declared"), ("identity-design", "skill", "declared"),
-                ("official-research", "environment", "verified"), ("read-input", "environment", "verified"),
-                ("markdown", "skill", "declared"), ("upload-delivery", "environment", "verified"),
-            )
-        ]
-        payload = {"op": "migrate", "task_id": task_id, "upgrade": identifier(body["upgrade"], "升级编号"),
-                   "image": image, "contract": {"project_id": rules.PROJECT, "review_mode": "source", "user_basis": "",
-                   "iteration": {"goal": "完成任务协作平台建设方案与本机试点验收清单", "previous": [], "next": []},
-                   "delivery": "任务协作平台建设方案.md 与本机试点验收清单", "requirements": requirements}}
-        expects.update({f"task:{task_id}": integer(body["version"], "version"),
-                        f"scope:{task_id}": integer(body["scope_version"], "scope_version")})
-        return {"task_id": task_id, "steps": [step(COORDINATOR, "pilot", payload, expects)]}
+        return migrate(actor, body, expects)
     if not rules.enabled(state):
         if action in ACTIONS | INTERNAL:
             raise ClientError("请先迁移数据合同", 409)
         return None
-    if state["pilot"]["format"]["maintenance"] and action not in {"maintenance-mode", "identity-bind", "project-save", "project-grant"}:
+    if state["pilot"]["format"]["maintenance"] and action not in MAINTENANCE_ACTIONS:
         raise ClientError("服务处于维护窗口", 503)
     if action == "add-task":
         raise ClientError("请通过登记页或 API 填写升级后的项目与领取能力合同")
     if action == "register":
-        required = "request_id title brief criteria kind " + scope_fields
-        fields(body, required + (" receiver" if "receiver" in body else "") + (" dispatch" if "dispatch" in body else ""))
-        receiver = identifier(body.get("receiver", actor), "接收者")
-        title = string(body["title"], "任务标题", 200)
-        if body["kind"] != "documentation":
-            raise ClientError("本机升级试点登记资料类任务")
-        raw = string(body["brief"], "任务说明", 40000).encode("utf-8")
-        criteria = body["criteria"]
-        if not isinstance(criteria, list) or not 1 <= len(criteria) <= 30:
-            raise ClientError("须填写 1 至 30 条完成判据")
-        criteria = [string(item, "完成判据", 100) for item in criteria]
-        if len(set(criteria)) != len(criteria):
-            raise ClientError("完成判据不能重复")
-        spec, dependencies, resources = scope_contract(state, body)
-        if state["pilot"]["format"]["schema"] >= rules.ROUND_VERSION and "dispatch" not in spec:
-            from 协作本轮 import DEFAULT_POLICY
-            spec["dispatch"] = {**DEFAULT_POLICY, "owner": rules.responsible(state, actor) or ""}
-        project = spec["project_id"]
-        if not (rules.manager(state, project, actor) or actor == receiver and "receiver" in rules.roles(state, project, actor)):
-            raise ClientError("须有项目任务登记权限", 403)
-        if "receiver" not in rules.roles(state, project, receiver):
-            raise ClientError("须选择获授权的项目接收者")
-        path = f"inputs/{digest(raw)}/brief.md"
-        prepared = service.registration(actor, key, title, criteria, receiver, path, raw, expects, rules.project_record(state, project)["name"])
-        prepared["steps"][-1]["payload"].update(contract=spec, resources=resources, dependencies=dependencies)
-        return prepared
+        return register(service, actor, key, body, state, expects)
     if action not in ACTIONS | INTERNAL:
         return None
-
-    if action == "maintenance-mode":
-        fields(body, "request_id enabled")
-        if type(body["enabled"]) is not bool:
-            raise ClientError("须声明维护状态")
-        payload = {"op": "maintenance", "enabled": body["enabled"]}
-    elif action == "project-save":
-        fields(body, "request_id project_id name version")
-        payload = {"op": "project", "project_id": identifier(body["project_id"], "项目编号"),
-                   "name": string(body["name"], "项目名称", 100).strip(), "version": version(body["version"])}
-    elif action == "identity-bind":
-        fields(body, "request_id name kind owner reason source")
-        name = identifier(body["name"], "原身份")
-        kind = body["kind"]
-        if not isinstance(kind, str) or kind not in {"human", "executor"} or kind == "human" and (body["owner"] != name or body["source"] is not None):
-            raise ClientError("人员绑定须归本人，执行端须提供责任账号及会话资料")
-        owner = identifier(body["owner"], "责任账号")
-        payload = {"op": "bind", "name": name, "kind": kind, "owner": owner,
-                   "reason": string(body["reason"], "绑定依据"),
-                   "source": source_profile(body["source"], state, owner) if kind == "executor" else None}
-    elif action == "project-grant":
-        fields(body, "request_id project_id name roles resources version")
-        payload = {"op": "grant", "project_id": identifier(body["project_id"], "项目编号"),
-                   "name": identifier(body["name"], "身份"), "roles": role_list(body["roles"], grantable(state)),
-                   "resources": rules.resources(body["resources"]), "version": version(body["version"])}
-    elif action == "executor-enroll":
-        fields(body, "request_id project_id roles source")
-        name = "x-" + digest(encoded([key, "executor"]))[:24]
-        requested = role_list(body["roles"], {"executor", "receiver"})
-        if not requested:
-            raise ClientError("须至少选择一个执行端角色")
-        payload = {"op": "enroll", "name": name, "project_id": identifier(body["project_id"], "项目编号"),
-                   "roles": requested, "source": source_profile(body["source"], state, actor)}
-        result["enrollment"] = {"name": name, "role": "executor"}
-    elif action == "executor-sync":
-        fields(body, "request_id session model environment" + (" window_name" if "window_name" in body else "") +
-               (" platform" if "platform" in body else ""))
-        payload = {"op": "sync", "session": string(body["session"], "原始会话", 200),
-                   "model": string(body["model"], "模型", 120), "environment": string(body["environment"], "环境标识", 160)}
-        if "window_name" in body:
-            payload["window_name"] = window_name(body["window_name"])
-        if "platform" in body:
-            if not isinstance(body["platform"], str) or body["platform"] not in rules.PLATFORMS:
-                raise ClientError("平台须从登记表选择")
-            payload["platform"] = body["platform"]
-    elif action == "credential-change":
-        fields(body, "request_id name version status reason")
-        name = identifier(body["name"], "身份")
-        if not isinstance(body["status"], str) or body["status"] not in {"active", "disabled"}:
-            raise ClientError("凭据状态无效")
-        if state["pilot"]["format"]["schema"] >= rules.ROUND_VERSION and body["status"] == "active":
-            raise ClientError("请通过待确认凭据轮换入口签发新令牌")
-        payload = {"op": "credential", "name": name, "version": integer(body["version"], "version"),
-                   "status": body["status"], "reason": string(body["reason"], "凭据处置依据")}
-        role = service.accounts.role(name)
-        if not role:
-            roles = state["origins"].get(name, {}).get("roles", [])
-            role = roles[0] if roles else "executor"
-        result["credential"] = {"name": name, "role": role, "enabled": body["status"] == "active"}
-    elif action == "capability-save":
-        fields(body, "request_id project_id name capability kind value level evidence environment expires version" +
-               ''.join(' '+k for k in ('context_dimensions','context_id','context_version') if k in body))
-        project = identifier(body["project_id"], "项目编号")
-        if not rules.roles(state, project, actor) & rules.ROLES:
-            raise ClientError("当前项目角色只能查看能力记录", 403)
-        name = identifier(body["name"], "执行身份")
-        capability = string(body["capability"], "能力标识", 48)
-        if (not rules.CAP_ID.fullmatch(capability) or not isinstance(body["kind"], str) or
-                body["kind"] not in {"skill", "environment"} or not isinstance(body["level"], str) or
-                body["level"] not in rules.LEVEL or type(body["expires"]) is not int or
-                not time.time() < body["expires"] < time.time() + 366 * 86400):
-            raise ClientError("能力、证据等级或有效期无效")
-        evidence = body["evidence"]
-        fields(evidence, "note sha256")
-        evidence = {"note": string(evidence["note"], "证据说明"), "sha256": evidence["sha256"]}
-        if body["level"] in {"verified", "probed"}:
-            if security_schema(state)>=5 and (rules.identity(state,actor) or {}).get('kind')!='human':
-                raise ClientError('探测或核实等级须由有项目授权的人类办理；AI不能借旧接口相互核实',403)
-            sha256(evidence["sha256"])
-        elif evidence["sha256"]:
-            sha256(evidence["sha256"])
-        elif evidence["sha256"] != "":
-            raise ClientError("证据指纹格式无效")
-        environment = string(body["environment"], "环境标识", 160)
-        if security_schema(state)<5 and body["kind"] == "environment" and environment != (rules.identity(state, name) or {}).get("environment", "human"):
-            raise ClientError("证据与执行端登记的环境不一致")
-        payload = {"op": "capability", "project_id": project,
-                   "name": name, "id": capability, "version": version(body["version"]), "record": {
-                       "kind": body["kind"], "value": string(body["value"], "能力值", 100).strip(), "level": body["level"],
-                       "evidence": evidence, "environment": environment, "expires": body["expires"],
-                   }}
-        if security_schema(state)>=5:
-            from 协作执行 import bind_evidence, context_record
-            selected=context_record(state,name,{'context_id':body['context_id'],'version':body['context_version']}) if body.get('context_id') else None
-            payload['record'].update(bind_evidence(state,name,payload['record'],selected,project,capability,
-                body.get('context_dimensions'),body['level'] in {'verified','probed'}))
-    elif action in {"task-publish", "task-hold", "task-scope", "task-interrupt", "task-recover"}:
-        op = action.removeprefix("task-")
-        suffix = {"publish": "scope_version", "hold": "scope_version", "scope": "scope_version " + scope_fields,
-                  "interrupt": "claim_id epoch", "recover": "claim_id epoch evidence notes unresolved"}[op]
-        fields(body, "request_id task_id version reason " + suffix + (" dispatch" if op == "scope" and "dispatch" in body else ""))
-        task_id = identifier(body["task_id"], "任务编号")
-        task = state["tasks"].get(task_id)
-        if not task or not rules.contract(task) or not rules.visible(state, task, actor):
-            raise ClientError("项目任务不存在或无权查看", 404)
-        result["task_id"] = task_id
-        expects[f"task:{task_id}"] = integer(body["version"], "version")
-        payload = {"op": "resolve" if op == "recover" else op, "task_id": task_id,
-                   "reason": string(body["reason"], "操作依据")}
-        if op in {"publish", "hold", "scope"}:
-            if not rules.manager(state, rules.task_project(task), actor):
-                raise ClientError("仅项目管理员可调整发布及范围", 403)
-            payload["scope_version"] = integer(body["scope_version"], "scope_version")
-        if op == "scope":
-            spec, dependencies, resources = scope_contract(state, body, task_id)
-            payload.update(contract=spec, dependencies=dependencies, resources=resources)
-        if op in {"interrupt", "recover"}:
-            cid = identifier(body["claim_id"], "领取编号") if len(str(body["claim_id"])) <= 80 else string(body["claim_id"], "领取编号", 100)
-            claim = state["claims"].get(cid)
-            if not claim or claim["task_id"] != task_id:
-                raise ClientError("领取与任务不匹配", 409)
-            payload.update(claim_id=cid, epoch=integer(body["epoch"], "epoch"))
-            result["claim_id"] = cid
-        if op == "recover":
-            if not rules.manager(state, rules.task_project(task), actor):
-                raise ClientError("仅项目管理员可处置恢复待核", 403)
-            notes = string(body["notes"], "接续说明", 16000)
-            evidence = string(body["evidence"], "停止与资源处置证据")
-            unresolved = body["unresolved"]
-            if not isinstance(unresolved, str) or len(unresolved) > 4000:
-                raise ClientError("外部效果待核记录无效")
-            raw = encoded({"task_id": task_id, "claim_id": cid, "origin_id": claim["origin"],
-                           "inputs": claim["inputs"], "notes": notes, "stop_evidence": evidence,
-                           "unresolved": unresolved, "decided_by": actor})
-            path = f"handoffs/{cid}/{digest(raw)}.json"
-            file = [path, base64.b64encode(raw).decode("ascii")]
-            payload.update(evidence=evidence, unresolved=unresolved, replacement=path)
-    elif action in {"release-accept", "release-close", "release-correct"}:
-        suffix = {"release-accept": " report", "release-close": " acceptance", "release-correct": ""}[action]
-        fields(body, "request_id reason" + suffix)
-        payload = {"op": action, "reason": string(body["reason"], "验收或处置依据")}
-        if action == "release-accept":
-            if "receiver" not in rules.roles(state, rules.PROJECT, actor):
-                raise ClientError("仅项目接收者可提交升级验收", 403)
-            rules.verify_report(state, body["report"])
-            raw = encoded(body["report"])
-            if len(raw) > 256 * 1024:
-                raise ClientError("验收证据清单过长", 413)
-            path = f"upgrade-evidence/{digest(raw)}.json"
-            payload["evidence"] = {"path": path, "sha256": digest(raw)}
-            file = [path, base64.b64encode(raw).decode("ascii")]
-        elif action == "release-close":
-            payload["acceptance"] = sha256(body["acceptance"])
-    else:
+    planner = PILOT.get(action)
+    if planner is None:
         raise ClientError("未知升级操作", 404)
-
+    op = Operation(service, actor, action, key, body, state, expects)
+    payload = planner(op)
     operation = step(COORDINATOR, "pilot", payload, expects)
-    if file:
-        operation["file"] = file
-    return {**result, "steps": [operation]}
+    if op.file:
+        operation["file"] = op.file
+    return {**op.result, "steps": [operation]}
+
+
+def migrate(actor, body, expects):
+    fields(body, "request_id task_id version scope_version upgrade image")
+    if actor != ADMIN:
+        raise ClientError("迁移须由本机管理员入口办理", 403)
+    task_id = identifier(body["task_id"], "任务号")
+    image = sha256(body["image"])
+    requirements = [
+        {"id": name, "kind": kind, "value": "*", "required": True, "evidence": level}
+        for name, kind, level in (
+            ("workflow-design", "skill", "declared"), ("identity-design", "skill", "declared"),
+            ("official-research", "environment", "verified"), ("read-input", "environment", "verified"),
+            ("markdown", "skill", "declared"), ("upload-delivery", "environment", "verified"),
+        )
+    ]
+    payload = {"op": "migrate", "task_id": task_id, "upgrade": identifier(body["upgrade"], "升级编号"),
+               "image": image, "contract": {"project_id": rules.PROJECT, "review_mode": "source", "user_basis": "",
+               "iteration": {"goal": "完成任务协作平台建设方案与本机试点验收清单", "previous": [], "next": []},
+               "delivery": "任务协作平台建设方案.md 与本机试点验收清单", "requirements": requirements}}
+    expects.update({f"task:{task_id}": integer(body["version"], "version"),
+                    f"scope:{task_id}": integer(body["scope_version"], "scope_version")})
+    return {"task_id": task_id, "steps": [step(COORDINATOR, "pilot", payload, expects)]}
+
+
+def register(service, actor, key, body, state, expects):
+    required = "request_id title brief criteria kind " + SCOPE_FIELDS
+    fields(body, required + (" receiver" if "receiver" in body else "") + (" dispatch" if "dispatch" in body else ""))
+    receiver = identifier(body.get("receiver", actor), "接收者")
+    title = string(body["title"], "任务标题", 200)
+    if body["kind"] != "documentation":
+        raise ClientError("本机升级试点登记资料类任务")
+    raw = string(body["brief"], "任务说明", 40000).encode("utf-8")
+    criteria = body["criteria"]
+    if not isinstance(criteria, list) or not 1 <= len(criteria) <= 30:
+        raise ClientError("须填写 1 至 30 条完成判据")
+    criteria = [string(item, "完成判据", 100) for item in criteria]
+    if len(set(criteria)) != len(criteria):
+        raise ClientError("完成判据不能重复")
+    spec, dependencies, resources = scope_contract(state, body)
+    if state["pilot"]["format"]["schema"] >= rules.ROUND_VERSION and "dispatch" not in spec:
+        spec["dispatch"] = {**DEFAULT_POLICY, "owner": rules.responsible(state, actor) or ""}
+    project = spec["project_id"]
+    if not (rules.manager(state, project, actor) or actor == receiver and "receiver" in rules.roles(state, project, actor)):
+        raise ClientError("须有项目任务登记权限", 403)
+    if "receiver" not in rules.roles(state, project, receiver):
+        raise ClientError("须选择获授权的项目接收者")
+    path = f"inputs/{digest(raw)}/brief.md"
+    prepared = service.registration(actor, key, title, criteria, receiver, path, raw, expects, rules.project_record(state, project)["name"])
+    prepared["steps"][-1]["payload"].update(contract=spec, resources=resources, dependencies=dependencies)
+    return prepared
+
+
+def maintenance_mode(op):
+    body = op.body
+    fields(body, "request_id enabled")
+    if type(body["enabled"]) is not bool:
+        raise ClientError("须声明维护状态")
+    return {"op": "maintenance", "enabled": body["enabled"]}
+
+
+def project_save(op):
+    body = op.body
+    fields(body, "request_id project_id name version")
+    return {"op": "project", "project_id": identifier(body["project_id"], "项目编号"),
+            "name": string(body["name"], "项目名称", 100).strip(), "version": version(body["version"])}
+
+
+def identity_bind(op):
+    body = op.body
+    fields(body, "request_id name kind owner reason source")
+    name = identifier(body["name"], "原身份")
+    kind = body["kind"]
+    if not isinstance(kind, str) or kind not in {"human", "executor"} or kind == "human" and (body["owner"] != name or body["source"] is not None):
+        raise ClientError("人员绑定须归本人，执行端须提供责任账号及会话资料")
+    owner = identifier(body["owner"], "责任账号")
+    return {"op": "bind", "name": name, "kind": kind, "owner": owner,
+            "reason": string(body["reason"], "绑定依据"),
+            "source": source_profile(body["source"], op.state, owner) if kind == "executor" else None}
+
+
+def project_grant(op):
+    body = op.body
+    fields(body, "request_id project_id name roles resources version")
+    return {"op": "grant", "project_id": identifier(body["project_id"], "项目编号"),
+            "name": identifier(body["name"], "身份"), "roles": role_list(body["roles"], grantable(op.state)),
+            "resources": rules.resources(body["resources"]), "version": version(body["version"])}
+
+
+def executor_enroll(op):
+    body = op.body
+    fields(body, "request_id project_id roles source")
+    name = "x-" + digest(encoded([op.key, "executor"]))[:24]
+    requested = role_list(body["roles"], {"executor", "receiver"})
+    if not requested:
+        raise ClientError("须至少选择一个执行端角色")
+    payload = {"op": "enroll", "name": name, "project_id": identifier(body["project_id"], "项目编号"),
+               "roles": requested, "source": source_profile(body["source"], op.state, op.actor)}
+    op.result["enrollment"] = {"name": name, "role": "executor"}
+    return payload
+
+
+def executor_sync(op):
+    body = op.body
+    fields(body, "request_id session model environment" + (" window_name" if "window_name" in body else "") +
+           (" platform" if "platform" in body else ""))
+    payload = {"op": "sync", "session": string(body["session"], "原始会话", 200),
+               "model": string(body["model"], "模型", 120), "environment": string(body["environment"], "环境标识", 160)}
+    if "window_name" in body:
+        payload["window_name"] = window_name(body["window_name"])
+    if "platform" in body:
+        if not isinstance(body["platform"], str) or body["platform"] not in rules.PLATFORMS:
+            raise ClientError("平台须从登记表选择")
+        payload["platform"] = body["platform"]
+    return payload
+
+
+def credential_change(op):
+    body, state = op.body, op.state
+    fields(body, "request_id name version status reason")
+    name = identifier(body["name"], "身份")
+    if not isinstance(body["status"], str) or body["status"] not in {"active", "disabled"}:
+        raise ClientError("凭据状态无效")
+    if state["pilot"]["format"]["schema"] >= rules.ROUND_VERSION and body["status"] == "active":
+        raise ClientError("请通过待确认凭据轮换入口签发新令牌")
+    payload = {"op": "credential", "name": name, "version": integer(body["version"], "version"),
+               "status": body["status"], "reason": string(body["reason"], "凭据处置依据")}
+    role = op.service.accounts.role(name)
+    if not role:
+        roles = state["origins"].get(name, {}).get("roles", [])
+        role = roles[0] if roles else "executor"
+    op.result["credential"] = {"name": name, "role": role, "enabled": body["status"] == "active"}
+    return payload
+
+
+def capability_save(op):
+    body, state, actor = op.body, op.state, op.actor
+    fields(body, "request_id project_id name capability kind value level evidence environment expires version" +
+           ''.join(' '+k for k in ('context_dimensions','context_id','context_version') if k in body))
+    project = identifier(body["project_id"], "项目编号")
+    if not rules.roles(state, project, actor) & rules.ROLES:
+        raise ClientError("当前项目角色只能查看能力记录", 403)
+    name = identifier(body["name"], "执行身份")
+    capability = string(body["capability"], "能力标识", 48)
+    if (not rules.CAP_ID.fullmatch(capability) or not isinstance(body["kind"], str) or
+            body["kind"] not in {"skill", "environment"} or not isinstance(body["level"], str) or
+            body["level"] not in rules.LEVEL or type(body["expires"]) is not int or
+            not time.time() < body["expires"] < time.time() + 366 * 86400):
+        raise ClientError("能力、证据等级或有效期无效")
+    evidence = body["evidence"]
+    fields(evidence, "note sha256")
+    evidence = {"note": string(evidence["note"], "证据说明"), "sha256": evidence["sha256"]}
+    if body["level"] in {"verified", "probed"}:
+        if security_schema(state)>=5 and (rules.identity(state,actor) or {}).get('kind')!='human':
+            raise ClientError('探测或核实等级须由有项目授权的人类办理；AI不能借旧接口相互核实',403)
+        sha256(evidence["sha256"])
+    elif evidence["sha256"]:
+        sha256(evidence["sha256"])
+    elif evidence["sha256"] != "":
+        raise ClientError("证据指纹格式无效")
+    environment = string(body["environment"], "环境标识", 160)
+    if security_schema(state)<5 and body["kind"] == "environment" and environment != (rules.identity(state, name) or {}).get("environment", "human"):
+        raise ClientError("证据与执行端登记的环境不一致")
+    payload = {"op": "capability", "project_id": project,
+               "name": name, "id": capability, "version": version(body["version"]), "record": {
+                   "kind": body["kind"], "value": string(body["value"], "能力值", 100).strip(), "level": body["level"],
+                   "evidence": evidence, "environment": environment, "expires": body["expires"],
+               }}
+    if security_schema(state)>=5:
+        selected=context_record(state,name,{'context_id':body['context_id'],'version':body['context_version']}) if body.get('context_id') else None
+        payload['record'].update(bind_evidence(state,name,payload['record'],selected,project,capability,
+            body.get('context_dimensions'),body['level'] in {'verified','probed'}))
+    return payload
+
+
+def task_operation(op):
+    """Publish, hold or rescope a project task, or interrupt or resolve one of its claims."""
+    body, state, actor = op.body, op.state, op.actor
+    kind = op.action.removeprefix("task-")
+    suffix = {"publish": "scope_version", "hold": "scope_version", "scope": "scope_version " + SCOPE_FIELDS,
+              "interrupt": "claim_id epoch", "recover": "claim_id epoch evidence notes unresolved"}[kind]
+    fields(body, "request_id task_id version reason " + suffix + (" dispatch" if kind == "scope" and "dispatch" in body else ""))
+    task_id = identifier(body["task_id"], "任务编号")
+    task = state["tasks"].get(task_id)
+    if not task or not rules.contract(task) or not rules.visible(state, task, actor):
+        raise ClientError("项目任务不存在或无权查看", 404)
+    op.result["task_id"] = task_id
+    op.expects[f"task:{task_id}"] = integer(body["version"], "version")
+    payload = {"op": "resolve" if kind == "recover" else kind, "task_id": task_id,
+               "reason": string(body["reason"], "操作依据")}
+    if kind in {"publish", "hold", "scope"}:
+        if not rules.manager(state, rules.task_project(task), actor):
+            raise ClientError("仅项目管理员可调整发布及范围", 403)
+        payload["scope_version"] = integer(body["scope_version"], "scope_version")
+    if kind == "scope":
+        spec, dependencies, resources = scope_contract(state, body, task_id)
+        payload.update(contract=spec, dependencies=dependencies, resources=resources)
+    if kind in {"interrupt", "recover"}:
+        cid = identifier(body["claim_id"], "领取编号") if len(str(body["claim_id"])) <= 80 else string(body["claim_id"], "领取编号", 100)
+        claim = state["claims"].get(cid)
+        if not claim or claim["task_id"] != task_id:
+            raise ClientError("领取与任务不匹配", 409)
+        payload.update(claim_id=cid, epoch=integer(body["epoch"], "epoch"))
+        op.result["claim_id"] = cid
+    if kind == "recover":
+        if not rules.manager(state, rules.task_project(task), actor):
+            raise ClientError("仅项目管理员可处置恢复待核", 403)
+        notes = string(body["notes"], "接续说明", 16000)
+        evidence = string(body["evidence"], "停止与资源处置证据")
+        unresolved = body["unresolved"]
+        if not isinstance(unresolved, str) or len(unresolved) > 4000:
+            raise ClientError("外部效果待核记录无效")
+        raw = encoded({"task_id": task_id, "claim_id": cid, "origin_id": claim["origin"],
+                       "inputs": claim["inputs"], "notes": notes, "stop_evidence": evidence,
+                       "unresolved": unresolved, "decided_by": actor})
+        path = f"handoffs/{cid}/{digest(raw)}.json"
+        op.file = [path, base64.b64encode(raw).decode("ascii")]
+        payload.update(evidence=evidence, unresolved=unresolved, replacement=path)
+    return payload
+
+
+def release_operation(op):
+    body, state, action = op.body, op.state, op.action
+    suffix = {"release-accept": " report", "release-close": " acceptance", "release-correct": ""}[action]
+    fields(body, "request_id reason" + suffix)
+    payload = {"op": action, "reason": string(body["reason"], "验收或处置依据")}
+    if action == "release-accept":
+        if "receiver" not in rules.roles(state, rules.PROJECT, op.actor):
+            raise ClientError("仅项目接收者可提交升级验收", 403)
+        rules.verify_report(state, body["report"])
+        raw = encoded(body["report"])
+        if len(raw) > 256 * 1024:
+            raise ClientError("验收证据清单过长", 413)
+        path = f"upgrade-evidence/{digest(raw)}.json"
+        payload["evidence"] = {"path": path, "sha256": digest(raw)}
+        op.file = [path, base64.b64encode(raw).decode("ascii")]
+    elif action == "release-close":
+        payload["acceptance"] = sha256(body["acceptance"])
+    return payload
+
+
+PILOT = {
+    "maintenance-mode": maintenance_mode, "project-save": project_save, "identity-bind": identity_bind,
+    "project-grant": project_grant, "executor-enroll": executor_enroll, "executor-sync": executor_sync,
+    "credential-change": credential_change, "capability-save": capability_save,
+    "task-publish": task_operation, "task-hold": task_operation, "task-scope": task_operation,
+    "task-interrupt": task_operation, "task-recover": task_operation,
+    "release-accept": release_operation, "release-close": release_operation, "release-correct": release_operation,
+}
 
 
 def target(state, body, prepared=None):
