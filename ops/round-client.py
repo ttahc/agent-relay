@@ -1503,7 +1503,7 @@ def run_once(state, api):
     return result
 
 
-def main():
+def build_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--state", type=Path, required=True, help="此窗口的私有凭据文件")
     parser.add_argument("--allow-loopback", action="store_true", help="允许隔离测试的 HTTP 回环服务")
@@ -1692,102 +1692,121 @@ def main():
     configure.add_argument("--command", nargs=argparse.REMAINDER)
     run = commands.add_parser("run")
     run.add_argument("--once", action="store_true")
-    args = parser.parse_args()
+    return parser
+
+
+def capability_records(state, api, args):
+    token = state.data["token"]
+    if args.capability_action == "request":
+        return request_capability(state, api, args)
+    if args.capability_action == "resolve":
+        return resolve_capability(state, api, args)
+    if args.capability_action == "requests":
+        value = api.call("capability-requests", token)
+        if args.project:
+            value = [row for row in value if row["project_id"] == args.project]
+        return value
+    value = api.call("capabilities", token)
+    if args.project:
+        value = {**value, "capabilities": [row for row in value["capabilities"] if row["project_id"] == args.project]}
+    return value
+
+
+def delegation_records(state, api, args):
+    value = api.call("delegations", state.data["token"])
+    if args.project:
+        value = {**value, "delegations": [row for row in value["delegations"] if row["project_id"] == args.project]}
+    return value
+
+
+def read_board(state, api, args):
+    value = api.call("board", state.data["token"], response_format="text")
+    if args.output:
+        ref = {"path": args.output.name, "sha256": hashlib.sha256(value.encode("utf-8")).hexdigest()}
+        value = {"saved_to": save_artifact(args.output.parent, ref, value.encode("utf-8")), "sha256": ref["sha256"]}
+    return value
+
+
+def configure_runner(state, api, args):
+    token = state.data["token"]
+    command = args.command or []
+    if command and (not Path(command[0]).is_absolute() or not Path(command[0]).is_file() or
+                    Path(command[0]).suffix.lower() in (".bat", ".cmd") or not args.workdir.is_dir()):
+        raise ValueError("本机入口须为绝对路径的可执行文件及已存在的工作目录")
+    parameters = {"command": command, "workdir": str(args.workdir.resolve()), "limit": args.limit, "heartbeat": args.heartbeat}
+    def prepare_configuration():
+        settings = api.call("runner", token)["settings"]
+        return {"version": settings.get("version", 0), "limit": args.limit, "auto": bool(command),
+                "heartbeat": args.heartbeat, "adapter": "local-command" if command else ""}
+    return durable_write(state, api, operation_key("configure", parameters), "runner-settings", prepare_configuration,
+                         {"command": command, "workdir": str(args.workdir.resolve()), "heartbeat": args.heartbeat})
+
+
+def run_loop(state, api, args):
+    if state.data.get("pending_write"):
+        raise ValueError("有待确认写入，请先运行 pending 和 retry，再启动自动执行")
+    while True:
+        value = run_once(state, api)
+        if args.once:
+            return value
+        print(json.dumps(public_value(value), ensure_ascii=False), flush=True)
+        time.sleep(random.uniform(24, 36))
+
+
+# Commands answered from the credential file alone.  Each entry looks its function up
+# when called, so a replaced module-level function is the one that runs.
+LOCAL_COMMANDS = {
+    "enroll": lambda state, args: enroll(state, args),
+    "activate": lambda state, args: activate(state, args),
+    "sync": lambda state, args: sync(state, args),
+    "pending": lambda state, args: pending_summary(state),
+    "trust-update": lambda state, args: trust_update(state, args),
+}
+EXECUTION_COMMANDS = ("execution", "context", "segment", "action", "resource", "fact", "stash")
+# Commands that talk to the service with this window's token; "run" is every remaining one.
+SERVICE_COMMANDS = {
+    "whoami": lambda state, api, args: whoami(state, api),
+    "rename": lambda state, api, args: rename(state, api, args.name),
+    **{name: lambda state, api, args: execution_command(state, api, args) for name in EXECUTION_COMMANDS},
+    "tasks": lambda state, api, args: visible_tasks(state, api, args),
+    "capabilities": lambda state, api, args: capability_records(state, api, args),
+    "declare": lambda state, api, args: declared_capability(state, api, args),
+    "show": lambda state, api, args: api.call("tasks/" + quote(args.task, safe=""), state.data["token"]),
+    "claim": lambda state, api, args: claim_task(state, api, args),
+    "resume": lambda state, api, args: resume_task(state, api, args),
+    "create": lambda state, api, args: create_task(state, api, args),
+    "publish": lambda state, api, args: task_publication(state, api, args),
+    "hold": lambda state, api, args: task_publication(state, api, args),
+    "download": lambda state, api, args: download_task(state, api, args),
+    "deliver": lambda state, api, args: deliver_task(state, api, args),
+    "stop": lambda state, api, args: stop_or_handoff(state, api, args),
+    "handoff": lambda state, api, args: stop_or_handoff(state, api, args),
+    "feedback": lambda state, api, args: feedback(state, api, args),
+    "feedback-update": lambda state, api, args: update_feedback(state, api, args),
+    "delegations": lambda state, api, args: delegation_records(state, api, args),
+    "board": lambda state, api, args: read_board(state, api, args),
+    "retry": lambda state, api, args: durable_write(state, api),
+    "poll": lambda state, api, args: poll(state, api),
+    "configure": lambda state, api, args: configure_runner(state, api, args),
+}
+
+
+def run_command(state, args):
+    if args.action in LOCAL_COMMANDS:
+        return LOCAL_COMMANDS[args.action](state, args)
+    api = endpoint(state, args)
+    state.data["token"]  # a credential file without a token ends here, before any request
+    return SERVICE_COMMANDS.get(args.action, run_loop)(state, api, args)
+
+
+def main():
+    args = build_parser().parse_args()
     state = None
     try:
         state = State(args.state)
         state.supersedes_request_id=getattr(args,'supersedes_request_id',None)
         with state.exclusive():
-            if args.action == "enroll":
-                value = enroll(state, args)
-            elif args.action == "activate":
-                value = activate(state, args)
-            elif args.action == "sync":
-                value = sync(state, args)
-            elif args.action == "pending":
-                value = pending_summary(state)
-            elif args.action == "trust-update":
-                value = trust_update(state, args)
-            else:
-                api = endpoint(state, args)
-                token = state.data["token"]
-                if args.action == "whoami":
-                    value = whoami(state, api)
-                elif args.action == "rename":
-                    value = rename(state, api, args.name)
-                elif args.action in {"execution", "context", "segment", "action", "resource", "fact", "stash"}:
-                    value = execution_command(state, api, args)
-                elif args.action == "tasks":
-                    value = visible_tasks(state, api, args)
-                elif args.action == "capabilities":
-                    if args.capability_action == "request":
-                        value = request_capability(state, api, args)
-                    elif args.capability_action == "resolve":
-                        value = resolve_capability(state, api, args)
-                    elif args.capability_action == "requests":
-                        value = api.call("capability-requests", token)
-                        if args.project:
-                            value = [row for row in value if row["project_id"] == args.project]
-                    else:
-                        value = api.call("capabilities", token)
-                        if args.project:
-                            value = {**value, "capabilities": [row for row in value["capabilities"] if row["project_id"] == args.project]}
-                elif args.action == "declare":
-                    value = declared_capability(state, api, args)
-                elif args.action == "show":
-                    value = api.call("tasks/" + quote(args.task, safe=""), token)
-                elif args.action == "claim":
-                    value = claim_task(state, api, args)
-                elif args.action == "resume":
-                    value = resume_task(state, api, args)
-                elif args.action == "create":
-                    value = create_task(state, api, args)
-                elif args.action in {"publish", "hold"}:
-                    value = task_publication(state, api, args)
-                elif args.action == "download":
-                    value = download_task(state, api, args)
-                elif args.action == "deliver":
-                    value = deliver_task(state, api, args)
-                elif args.action in {"stop", "handoff"}:
-                    value = stop_or_handoff(state, api, args)
-                elif args.action == "feedback":
-                    value = feedback(state, api, args)
-                elif args.action == "feedback-update":
-                    value = update_feedback(state, api, args)
-                elif args.action == "delegations":
-                    value = api.call("delegations", token)
-                    if args.project:
-                        value = {**value, "delegations": [row for row in value["delegations"] if row["project_id"] == args.project]}
-                elif args.action == "board":
-                    value = api.call("board", token, response_format="text")
-                    if args.output:
-                        ref = {"path": args.output.name, "sha256": hashlib.sha256(value.encode("utf-8")).hexdigest()}
-                        value = {"saved_to": save_artifact(args.output.parent, ref, value.encode("utf-8")), "sha256": ref["sha256"]}
-                elif args.action == "retry":
-                    value = durable_write(state, api)
-                elif args.action == "poll":
-                    value = poll(state, api)
-                elif args.action == "configure":
-                    command = args.command or []
-                    if command and (not Path(command[0]).is_absolute() or not Path(command[0]).is_file() or
-                                    Path(command[0]).suffix.lower() in (".bat", ".cmd") or not args.workdir.is_dir()):
-                        raise ValueError("本机入口须为绝对路径的可执行文件及已存在的工作目录")
-                    parameters = {"command": command, "workdir": str(args.workdir.resolve()), "limit": args.limit, "heartbeat": args.heartbeat}
-                    def prepare_configuration():
-                        settings = api.call("runner", token)["settings"]
-                        return {"version": settings.get("version", 0), "limit": args.limit, "auto": bool(command),
-                                "heartbeat": args.heartbeat, "adapter": "local-command" if command else ""}
-                    value = durable_write(state, api, operation_key("configure", parameters), "runner-settings", prepare_configuration,
-                                          {"command": command, "workdir": str(args.workdir.resolve()), "heartbeat": args.heartbeat})
-                else:
-                    if state.data.get("pending_write"):
-                        raise ValueError("有待确认写入，请先运行 pending 和 retry，再启动自动执行")
-                    while True:
-                        value = run_once(state, api)
-                        if args.once:
-                            break
-                        print(json.dumps(public_value(value), ensure_ascii=False), flush=True)
-                        time.sleep(random.uniform(24, 36))
+            value = run_command(state, args)
             print(value if isinstance(value, str) else json.dumps(public_value(value), ensure_ascii=False, indent=2), flush=True)
         return 0
     except (OSError, HTTPException, ValueError, RuntimeError, KeyError) as error:
