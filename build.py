@@ -16,7 +16,7 @@ FILES = [".gitignore", "LICENSE", "README.md", "build.py", "taskpool.py", "pool/
          "pool/round_projects.py", "pool/round_projects_web.py", "pool/account_projects.py",
          "pool/delegation.py", "pool/delegation_pages.py", "pool/invite_links.py",
          "pool/privacy.py", "pool/release_views.py", "pool/release_pages.py", "pool/display_time.py", "pool/backup.py", "pool/input_packages.py",
-         "pool/window_admin.py", "pool/window_admin_pages.py", "pool/lifecycle.py", "pool/sessions.py", "pool/safety.py", "pool/execution.py", "pool/execution_pages.py",
+         "pool/window_admin.py", "pool/window_admin_pages.py", "pool/lifecycle.py", "pool/wakeups.py", "pool/sessions.py", "pool/safety.py", "pool/execution.py", "pool/execution_pages.py",
          "pool/task_pages.py", "pool/upgrade.py", "pool/upgrade_pages.py",
          "pool/taskpool.css", "pool/workbench.py", "pool/workbench_pages.py", "pool/workbench.css", "pool/workbench.js", "vendor/SHA256SUMS", "docs/内网任务服务升级操作.md", "docs/本轮优化操作.md",
          "ops/podman-up.sh", "ops/fresh-install.sh", "ops/upgrade-local.sh", "ops/Set-LanIngress.ps1",

@@ -10,7 +10,7 @@ import logging
 import re
 import ssl
 import time
-from threading import BoundedSemaphore
+from threading import BoundedSemaphore, local
 from urllib.parse import parse_qs, urlsplit
 
 from . import round_service, round_web, web
@@ -20,6 +20,7 @@ from .packages import ClientError, MAX_JSON, strict_json
 from .service import PUBLIC_ACTIONS, Unavailable
 from .lifecycle import Maintenance
 from .sessions import DurableSessions
+from .wakeups import Wakeups, respond as wait_response
 from 协作存储 import encoded
 
 
@@ -71,7 +72,7 @@ READ_API = {
     "receipt": ({"request"}, one_value("request"), JSON, False),
 }
 READ_API_PREFIXES = (("tasks/", "task"), ("projects/", "project"))  # GET /v1/tasks/<id>, /v1/projects/<id>
-READ_ACTIONS = frozenset(READ_API) | {"artifact"}
+READ_ACTIONS = frozenset(READ_API) | {"artifact", "wait"}  # GET /v1/wait is held open, see pool/wakeups.py
 
 
 class Server(ThreadingHTTPServer):
@@ -96,6 +97,9 @@ class Server(ThreadingHTTPServer):
         self.sessions = DurableSessions(service)
         self.csrf_key = self.sessions.csrf_key
         self.request_slots = BoundedSemaphore(24)
+        self.slot = local()
+        self.wakeups = Wakeups()
+        self.lifecycle.listeners.append(self.wakeups.notify)
         super().__init__(("0.0.0.0" if tls else "127.0.0.1", port), Handler)
 
     def process_request(self, request, address):
@@ -109,10 +113,24 @@ class Server(ThreadingHTTPServer):
             raise
 
     def process_request_thread(self, request, address):
+        self.slot.held = True
         try:
             super().process_request_thread(request, address)
         finally:
+            if self.slot.held:
+                self.request_slots.release()
+
+    def release_request_slot(self):
+        """A request that only waits gives its slot back, so waiting clients cannot crowd out working ones."""
+        if getattr(self.slot, "held", False):
+            self.slot.held = False
             self.request_slots.release()
+
+    def server_close(self):
+        self.wakeups.close()
+        if self.wakeups.notify in self.lifecycle.listeners:
+            self.lifecycle.listeners.remove(self.wakeups.notify)
+        super().server_close()
 
     def finish_request(self, request, address):
         if not self.tls:
@@ -283,6 +301,8 @@ class Handler(BaseHTTPRequestHandler):
         if not ((method == "GET" and (action in READ_ACTIONS or action.startswith("tasks/") or action.startswith("projects/"))) or
                 (method == "POST" and (action in PUBLIC_ACTIONS or action in ROUND_WRITES))):
             raise ClientError("接口不存在，请从 /ai 查看接入说明", 404)
+        if self.server.is_round and method == "GET" and action == "wait":
+            return wait_response(self, target)
         actor = self.authenticate()
         if self.server.is_round and method == "POST" and api_route in ROUND_WRITES:
             return round_write(self, action)
@@ -407,7 +427,10 @@ class Handler(BaseHTTPRequestHandler):
         self.handle_api("GET")
 
     def do_POST(self):
-        self.handle_api("POST")
+        try:
+            self.handle_api("POST")
+        finally:
+            self.server.wakeups.ledger_changed(self.server.service)
 
     def do_HEAD(self):
         self.handle_api("GET")

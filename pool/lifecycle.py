@@ -22,10 +22,13 @@ class Lifecycle:
         self.active = 0
         self.changed = time.time()
         self.reason = ""
+        self.listeners = []  # called on every phase change, with the condition held: they must not block
 
     def _set(self, phase, reason=""):
         self.phase, self.reason, self.changed = phase, reason, time.time()
         self.condition.notify_all()
+        for listener in self.listeners:
+            listener()
 
     def status(self):
         with self.condition:

@@ -9,7 +9,7 @@ from collections import Counter
 from functools import cached_property
 import json
 
-from . import delegation, execution, input_packages, release_views, round_projects, round_service, upgrade, window_admin
+from . import delegation, execution, input_packages, release_views, round_projects, round_service, upgrade, wakeups, window_admin
 from .constants import ID
 from .packages import ClientError
 from .privacy import public, window_source
@@ -48,6 +48,9 @@ def features(r, argument):
     result.update(api_protocol=1, input_download=dict(input_packages.BUDGET))
     result.setdefault('features', {})['input-package'] = True
     result['features']['list-summary'] = True
+    if r.round_enabled:
+        result['features']['wait'] = True
+        result['wait'] = {'max_seconds': wakeups.MAX_HOLD}
     return result
 
 
@@ -302,6 +305,7 @@ def account_table(r, argument):
         if subject["kind"] not in {"human", "executor"}:
             continue
         rows.append({"name": name, "kind": subject["kind"], "status": subject["status"], "owner": subject.get("owner"),
+                     "credential": subject.get("credential"),
                      "platform": subject.get("platform"), "window": subject.get("window"), "admin": rules.system_admin(state, name),
                      "window_name": subject.get("window_name"),
                      "projects": [{"name": p["name"], "roles": sorted(rules.grant(state, p["id"], name)["roles"])}

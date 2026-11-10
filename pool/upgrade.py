@@ -294,7 +294,13 @@ def credential_change(op):
     if not isinstance(body["status"], str) or body["status"] not in {"active", "disabled"}:
         raise ClientError("凭据状态无效")
     if state["pilot"]["format"]["schema"] >= rules.ROUND_VERSION and body["status"] == "active":
-        raise ClientError("请通过待确认凭据轮换入口签发新令牌")
+        # Windows come back through a new token. A person signs in with a password, so the
+        # administrator restores a disabled person here; earlier sessions and tokens stay invalid.
+        subject = rules.identity(state, name) or {}
+        if subject.get("kind") != "human":
+            raise ClientError("请通过待确认凭据轮换入口签发新令牌")
+        if subject.get("status") != "disabled":
+            raise ClientError("该人员账号未停用；需要更换密码时请签发密码重置凭据")
     payload = {"op": "credential", "name": name, "version": integer(body["version"], "version"),
                "status": body["status"], "reason": string(body["reason"], "凭据处置依据")}
     role = op.service.accounts.role(name)

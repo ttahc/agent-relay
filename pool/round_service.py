@@ -303,6 +303,13 @@ def password_change(service, actor, name, kind, request, protected, reset_sha=No
         return status, value
 
 
+def ready_tasks(service, state, actor):
+    """Open tasks this identity may claim now, keyed by the notice event each one raises."""
+    return {ready_key(task, actor): task for task in state["tasks"].values()
+            if rules.contract(task) and task["status"] == "available" and rules.visible(state, task, actor) and
+            service.qualification(state, task, actor)["eligible"]}
+
+
 class Notices:
     """Persistent delivery attempts for ready tasks and exact returned revisions."""
 
@@ -364,12 +371,7 @@ class Notices:
         if state["pilot"]["format"]["maintenance"]:
             raise ClientError("服务处于维护窗口", 503)
         now = int(time.time())
-        ready = {}
-        for task in state["tasks"].values():
-            if rules.contract(task) and task["status"] == "available" and rules.visible(state, task, actor) and (
-                service.qualification(state, task, actor)["eligible"]
-            ):
-                ready[ready_key(task, actor)] = task
+        ready = ready_tasks(service, state, actor)
         returned = self._returned(state, actor)
         if returned:
             entries = service.snapshot().get("entries", [])
