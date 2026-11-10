@@ -3,6 +3,7 @@ from copy import deepcopy
 import time
 
 from .packages import ClientError, fields, string
+from .constants import COORDINATOR, step
 from .upgrade import identifier, sha256, version
 import 协作升级 as rules
 
@@ -109,7 +110,6 @@ def payload(state, actor, action, body, key):
 def plan(service, actor, action, key, body, state):
     if action not in ACTIONS:
         return None
-    from .service import COORDINATOR, step
     if state["pilot"].get("format", {}).get("schema") not in {3,4,5}:
         raise ClientError("须先迁移窗口数据合同", 409)
     p = payload(state, actor, action, body, key)

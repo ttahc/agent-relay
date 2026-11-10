@@ -3,6 +3,7 @@ import hmac
 import time
 
 from .packages import ClientError, fields, integer, string
+from .constants import ACCESS_TOKEN, ADMIN, COORDINATOR, ID, step
 from 协作本轮 import (ACTIVATION_SECONDS, OPS, TOKEN_SECONDS, automation_allowed, enabled, execution_settings,
                   invite_allowed, ready_key, rotation_allowed, usable_invite)
 from 协作存储 import digest, encoded
@@ -28,7 +29,6 @@ def boolean(value):
 
 
 def secret_hash(value):
-    from .service import ACCESS_TOKEN
     if not isinstance(value, str) or not ACCESS_TOKEN.fullmatch(value):
         raise ClientError("接入凭据无效或已到期", 403)
     return digest(value.encode("ascii"))
@@ -52,7 +52,6 @@ def source(raw, state, owner):
 
 
 def plan(service, actor, action, key, body, state):
-    from .service import COORDINATOR, step
     from .upgrade import identifier, role_list, sha256, version
     if action not in PUBLIC | INTERNAL:
         return None
@@ -263,7 +262,6 @@ def annotate_sources(service, state, sources):
 
 
 def password_signup(service, request, name, invitation, password):
-    from .service import ADMIN, COORDINATOR, ID
     if not ID.fullmatch(name) or not ID.fullmatch(request) or name.casefold() == ADMIN:
         raise ClientError("账号或请求编号格式无效")
     proof = secret_hash(invitation)

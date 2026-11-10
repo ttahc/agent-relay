@@ -6,6 +6,7 @@ import time
 from urllib.parse import urlsplit
 
 from .packages import ClientError, fields, integer, string
+from .constants import ADMIN, COORDINATOR, step
 import 协作升级 as rules
 from 协作存储 import digest, encoded
 
@@ -117,7 +118,6 @@ def scope_contract(state, body, task_id=None):
 
 
 def plan(service, actor, action, key, body, snap):
-    from .service import ADMIN, COORDINATOR, step
     state = snap["state"]
     expects = {"generation": state["generation"]}
     result = {}

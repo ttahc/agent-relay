@@ -5,6 +5,7 @@ from copy import deepcopy
 import time
 
 from .packages import ClientError, fields, string
+from .constants import COORDINATOR, step
 from 协作本轮 import (DELEGATION_ACTIONS, DELEGATION_EXECUTION, DELEGATION_MANAGEMENT,
                   DELEGATION_MAX_SECONDS, DELEGATION_PRESETS, delegable, delegation_action,
                   delegation_id, usable_delegation)
@@ -152,7 +153,6 @@ def enforce_audit(state, env, now):
 def plan(service, actor, action, key, body, state):
     if action not in ACTIONS:
         return None
-    from .service import COORDINATOR, step
     from .upgrade import identifier, version
     if state["pilot"].get("format", {}).get("schema") not in {3,4,5}:
         raise ClientError("须先迁移人员与 AI 委托数据合同", 409)
