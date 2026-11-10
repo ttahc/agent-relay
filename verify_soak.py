@@ -8,6 +8,7 @@ import time
 import zipfile
 
 from verify import ROOT, claim_args, server, sha
+from verify_support import fixture_dir, report_path
 from verify_round import Browser, Client, auth_checks, browser_admin_api, setup
 from verify_upgrade import capability, control, register, review, seal
 
@@ -24,7 +25,7 @@ def record(path, value):
 
 def exercise(args):
     archive = ROOT / "dist" / "task-pool-local.zip"
-    project = ROOT / "soak-fixture"
+    project = args.fixture or fixture_dir("soak-fixture")
     project.mkdir()
     with zipfile.ZipFile(archive) as package:
         package.extractall(project)
@@ -94,8 +95,10 @@ def exercise(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--seconds", type=int, default=86400)
-    parser.add_argument("--report", type=Path, required=True)
+    parser.add_argument("--report", type=Path, help="默认 dist/verify_soak.json")
+    parser.add_argument("--fixture", type=Path, help="默认仓库内 soak-fixture；长路径时改用系统临时目录")
     arguments = parser.parse_args()
+    arguments.report = arguments.report or report_path("verify_soak.json")
     if arguments.seconds < 0:
         parser.error("--seconds must be nonnegative")
     exercise(arguments)

@@ -15,6 +15,7 @@ import time
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 from verify import command, server, claim_args
+from verify_support import scratch
 from verify_round import Browser, Client, browser_admin_api, bind, setup
 from verify_upgrade import PROJECT, capability, claim, control, register, review
 
@@ -61,9 +62,9 @@ def storage_boundary():
 
 
 def application(compatibility=False):
-    with tempfile.TemporaryDirectory(prefix="phase1-review-", dir=ROOT / ".state") as directory:
+    with scratch("phase1-review-") as directory:
         copy = Path(directory)
-        for name in ("build.py", "taskpool.py", "README.md", ".gitignore", "verify.py", "verify_upgrade.py"):
+        for name in ("build.py", "taskpool.py", "README.md", "LICENSE", ".gitignore", "verify.py", "verify_upgrade.py", "verify_support.py"):
             shutil.copy2(ROOT / name, copy / name)
         for folder in ("pool", "vendor", "ops", "docs"):
             shutil.copytree(ROOT / folder, copy / folder, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))

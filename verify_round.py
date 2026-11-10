@@ -7,12 +7,12 @@ from pathlib import Path
 import re
 import secrets
 import sys
-import tempfile
 import time
 from urllib.parse import urlencode
 import zipfile
 
 from verify import ROOT, browser_client, call, claim_args, command, server, sha
+from verify_support import report_path, scratch
 from verify_upgrade import Client as PreviousClient, PROJECT, capability, claim, control, register, review, seal, source
 
 CASES = {}
@@ -478,12 +478,11 @@ def exercise(project):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--report", type=Path, required=True)
+    parser.add_argument("--report", type=Path, help="默认 dist/verify_round.json")
     args = parser.parse_args()
+    args.report = args.report or report_path("verify_round.json")
     archive = ROOT / "dist" / "task-pool-local.zip"
-    store = ROOT / ".state"
-    store.mkdir(exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="verify-round-", dir=store) as name:
+    with scratch("verify-round-") as name:
         with zipfile.ZipFile(archive) as package:
             package.extractall(name)
         qualification = exercise(Path(name))

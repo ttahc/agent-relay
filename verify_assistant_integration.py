@@ -8,11 +8,11 @@ from pathlib import Path
 import re
 import subprocess
 import sys
-import tempfile
 import time
 import zipfile
 
 from verify import ROOT, call, claim_args, server, sha
+from verify_support import scratch
 from verify_round import Browser, Client, browser_admin_api, setup
 from verify_upgrade import PROJECT, capability, claim, control, register, seal
 
@@ -290,10 +290,8 @@ def main():
     parser.add_argument("--archive", type=Path, default=ROOT / "dist/task-pool-local.zip")
     parser.add_argument("--report", type=Path)
     args = parser.parse_args()
-    parent = ROOT / ".state"
-    parent.mkdir(exist_ok=True)
     frozen_archive = args.archive.read_bytes()
-    with tempfile.TemporaryDirectory(prefix="assistant-integration-", dir=parent) as name:
+    with scratch("assistant-integration-") as name:
         with zipfile.ZipFile(BytesIO(frozen_archive)) as archive:
             archive.extractall(name)
         report = exercise(Path(name))

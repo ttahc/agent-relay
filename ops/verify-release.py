@@ -43,7 +43,7 @@ def write_json(path, value):
 
 def source_files(root):
     """Only source, bundled documentation and test helpers; no local stores or output."""
-    paths = [root / name for name in (".gitignore", "README.md", "build.py", "taskpool.py", "Containerfile") if (root/name).exists()]
+    paths = [root / name for name in (".gitignore", "README.md", "LICENSE", "build.py", "taskpool.py", "Containerfile") if (root/name).exists()]
     paths += list(root.glob("verify*.py")) + list(root.glob("verify*.js"))
     for folder, suffixes in SOURCE_SUFFIXES.items():
         paths += [path for path in (root / folder).rglob("*") if path.suffix.lower() in suffixes]
