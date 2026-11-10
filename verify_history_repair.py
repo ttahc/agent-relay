@@ -150,8 +150,8 @@ class Store:
     def scan(self):
         return history_repair.scan(self.path)[0]
 
-    def repair(self, tag="repair-one", **options):
-        return history_repair.repair(self.path, self.archive, tag, **options)
+    def repair(self, tag="repair-one"):
+        return history_repair.repair(self.path, self.archive, tag)
 
     def state(self):
         snap = self.ledger.read()
@@ -353,9 +353,9 @@ class RequestAudit(RepairCase):
 
     def test_report_names_the_requests_without_repeating_the_configuration(self):
         report = self.store.scan()
-        self.assertEqual([item["request_id"] for item in report["audit"]["replaceable"]], ["leaked"])
+        self.assertEqual([item["request_id"] for item in report["audit"]["journal_only"]], ["leaked"])
         self.assertEqual([item["request_id"] for item in report["audit"]["in_ledger"]], ["stepped"])
-        self.assertEqual(report["audit"]["replaceable"][0]["owner"], FOREIGN)
+        self.assertEqual(report["audit"]["journal_only"][0]["owner"], FOREIGN)
         self.assertEqual(report["resource_end"]["repairs"], [])
         for marker in MARKERS:
             self.assertNotIn(marker, json.dumps(report, ensure_ascii=False))
@@ -366,37 +366,16 @@ class RequestAudit(RepairCase):
         store.commit()
         late = store.record(FOREIGN_OWNER, "after-transfer", self.foreign)
         report = store.scan()
-        self.assertEqual(sorted(item["request_id"] for item in report["audit"]["replaceable"]), ["after-transfer", "leaked"])
+        self.assertEqual(sorted(item["request_id"] for item in report["audit"]["journal_only"]), ["after-transfer", "leaked"])
         self.assertNotEqual(late, self.untouched["responsible person"])
 
-    def test_apply_leaves_audit_rows_alone_unless_asked(self):
+    def test_apply_never_changes_an_audit_record(self):
         store = self.store
         before = store.files()
         result = store.repair()
-        self.assertEqual((result["event"], result["audit_replaced"]), (None, []))
+        self.assertIsNone(result["event"])
         self.assertEqual(store.files(), before)
         self.assertEqual(result["remaining_findings"], 2)
-
-    def test_redaction_replaces_only_the_journal_rows_the_requester_could_not_read(self):
-        store = self.store
-        original = store.details(self.leaked)
-        others = {name: store.details(key) for name, key in self.untouched.items()}
-        ledger = {name: raw for name, raw in store.files().items() if name.startswith(("ledger/", "inbox/"))}
-        result = store.repair(redact_audit=True)
-        self.assertIsNone(result["event"])
-        self.assertEqual({name: raw for name, raw in store.files().items() if name.startswith(("ledger/", "inbox/"))}, ledger)
-        record = json.loads(store.details(self.leaked))
-        self.assertEqual(record["execution_context"], self.own)
-        self.assertEqual((record["model"], record["platform"]), (self.own["config"]["model"], self.own["config"]["platform"]))
-        self.assertEqual(record["history_repair"]["original_sha256"], digest(original))
-        self.assertEqual([item["request_id"] for item in result["audit_replaced"]], ["leaked"])
-        for marker in (*MARKERS, "ctx-foreign"):
-            self.assertNotIn(marker, json.dumps(record, ensure_ascii=False))
-        for name, key in self.untouched.items():
-            self.assertEqual(store.details(key), others[name], name)
-        report = store.scan()
-        self.assertEqual(report["audit"]["replaceable"], [])
-        self.assertEqual([item["request_id"] for item in report["audit"]["in_ledger"]], ["stepped"])
         for marker in MARKERS:
             self.assertNotIn(marker, Path(result["receipt"]).read_text(encoding="utf-8"))
 
@@ -418,7 +397,7 @@ class CommandLine(RepairCase):
         report = json.loads(done.stdout)
         self.assertEqual(report["mode"], "dry-run")
         self.assertEqual(len(report["resource_end"]["repairs"]), 2)
-        for arguments in (("--apply",), ("--redact-audit",), ("--tag", "x")):
+        for arguments in (("--apply",), ("--tag", "x"), ("--archive", "/tmp/x")):
             refused = self.run_tool(*arguments)
             self.assertEqual(refused.returncode, 1, arguments)
             self.assertEqual(refused.stdout, "")

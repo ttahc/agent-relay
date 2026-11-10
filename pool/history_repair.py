@@ -9,9 +9,8 @@ are followed, and the values the current rules would have kept are worked out. T
 new ledger event that sets them; no existing ledger file is changed.
 
 Request audit. Older code copied a configuration named by a request into the requester's audit
-record even when it belonged to another window. Those records are listed. Only with --redact-audit
-are the ones held in the request journal alone replaced by the requester's own default; copies that
-entered the ledger are part of its hash chain and are never changed.
+record even when it belonged to another window. Those records are listed and never changed. The
+report says which exist only in the request journal and which are also in the ledger's hash chain.
 """
 import argparse
 from contextlib import ExitStack, closing
@@ -202,19 +201,18 @@ def _may_carry(state, record, context):
 
 
 def _audit_finding(state, record):
-    """None when the record is in order; otherwise what it carries and what it should carry instead."""
+    """None when the record is in order; otherwise whose configuration it carries."""
     field, context = _foreign(record)
     if not field:
         return None
     try:
         if _may_carry(state, record, context):
             return None
-        own = deepcopy(engine.default_context(state, record.get("actor")))
+        uncertain = False
     except (Rejected, KeyError, TypeError, AttributeError):
-        return {"field": field, "owner": context.get("executor_id"), "context_id": context.get("context_id"),
-                "uncertain": True, "replacement": None}
+        uncertain = True
     return {"field": field, "owner": context.get("executor_id"), "context_id": context.get("context_id"),
-            "uncertain": False, "replacement": own}
+            "uncertain": uncertain}
 
 
 def _journal_rows(store):
@@ -255,7 +253,7 @@ def scan(store, now=None):
             position += 1
             found = _audit_finding(state, record)
             if found:
-                journal.append({**found, "request_key": key, "raw": raw, "entered_ledger": stepped,
+                journal.append({**found, "entered_ledger": stepped,
                                 "request_id": record.get("request_id"), "actor": record.get("actor"),
                                 "operation": record.get("operation"), "received_utc": record.get("received_utc")})
 
@@ -282,7 +280,6 @@ def scan(store, now=None):
         for key, row in _execution(trial)["resource_requests"].items():
             if row["state"] != requests[key]["state"] and row["state"] in preview:
                 preview[row["state"]].append(key)
-    replaceable = [item for item in journal if not item["entered_ledger"] and not item["uncertain"]]
 
     def public(item):
         return {name: item[name] for name in ("request_id", "actor", "operation", "received_utc", "owner", "context_id")}
@@ -290,13 +287,13 @@ def scan(store, now=None):
         "ledger_head": snap["head"], "ledger_sha256": snap["sha256"],
         "resource_end": {"repairs": [{name: value for name, value in item.items() if name != "expect_sha256"} for item in repairs],
                          "needs_review": manual, "requests_after_repair": preview},
-        "audit": {"replaceable": [public(item) for item in replaceable],
+        "audit": {"journal_only": [public(item) for item in journal if not item["uncertain"] and not item["entered_ledger"]],
                   "uncertain": [public(item) for item in journal if item["uncertain"] and not item["entered_ledger"]],
                   "in_ledger": in_ledger + [{**public(item), "seq": None} for item in journal if item["entered_ledger"]]},
         "pending_requests": pending,
     }
     report["findings"] = (len(repairs) + len(manual) + len(journal) + len(in_ledger))
-    return report, {"repairs": repairs, "replaceable": replaceable, "snap": snap, "ledger": ledger}
+    return report, {"repairs": repairs, "snap": snap, "ledger": ledger}
 
 
 def _commit_event(plan, tag):
@@ -322,28 +319,7 @@ def _commit_event(plan, tag):
     return {"ledger_seq": decision["ledger_seq"], "sha256": decision["sha256"], "head": after["head"]}
 
 
-def _redact(store, items):
-    done = []
-    with closing(sqlite3.connect(safe(store, JOURNAL))) as db:
-        db.execute("PRAGMA synchronous=EXTRA")
-        with db:
-            for item in items:
-                record, own = json.loads(item["raw"]), item["replacement"]
-                record[item["field"]] = own
-                if "model" in record or "platform" in record:
-                    record.update(model=own.get("config", {}).get("model"), platform=own.get("config", {}).get("platform"))
-                original = digest(item["raw"] if isinstance(item["raw"], bytes) else str(item["raw"]).encode("utf-8"))
-                record["history_repair"] = {"replaced": item["field"], "original_sha256": original,
-                                            "at": datetime.now(timezone.utc).isoformat(timespec="microseconds")}
-                changed = db.execute("UPDATE request_context SET details=? WHERE request_key=? AND details=?",
-                                     (encoded(record), item["request_key"], item["raw"])).rowcount
-                if changed != 1:
-                    raise RepairError("审计记录在检查之后已变化，未替换任何审计记录")
-                done.append({"request_id": item["request_id"], "actor": item["actor"], "original_sha256": original})
-    return done
-
-
-def repair(store, archive, tag, redact_audit=False):
+def repair(store, archive, tag):
     """Back up, then repair under the service's own locks. The service must be stopped."""
     store = Path(store).resolve(strict=True)
     backup = snapshot(store, archive, tag)
@@ -353,13 +329,11 @@ def repair(store, archive, tag, redact_audit=False):
         report, plan = scan(store)
         if plan["snap"]["head"] != backup["head"]:
             raise RepairError("备份之后账本发生了变化，未作任何修复")
-        if report["pending_requests"] and (plan["repairs"] or (redact_audit and plan["replaceable"])):
+        if report["pending_requests"] and plan["repairs"]:
             raise RepairError("请求日志里还有未完成的请求；请先让服务处理完再停止服务，未作任何修复")
-        result = {"backup": {"manifest": backup["manifest"], "head": backup["head"]}, "event": None, "audit_replaced": []}
+        result = {"backup": {"manifest": backup["manifest"], "head": backup["head"]}, "event": None}
         if plan["repairs"]:
             result["event"] = _commit_event(plan, tag)
-        if redact_audit and plan["replaceable"]:
-            result["audit_replaced"] = _redact(store, plan["replaceable"])
         remaining, _ = scan(store)
     receipt = {"mode": "applied", "before": report, **result, "remaining_findings": remaining["findings"],
                "remaining": {"resource_end": remaining["resource_end"], "audit": remaining["audit"]}}
@@ -377,8 +351,6 @@ def main():
     parser.add_argument("--apply", action="store_true", help="写入修复；须同时给出 --archive 和 --tag，并先停止服务")
     parser.add_argument("--archive", type=Path, help="--apply：修复前完整备份所用的私有绝对目录")
     parser.add_argument("--tag", help="--apply：未使用过的备份名称")
-    parser.add_argument("--redact-audit", action="store_true",
-                        help="--apply：同时把仅存于请求日志的审计记录中其他窗口的配置替换为请求者自己的默认配置")
     args = parser.parse_args()
     try:
         if os.name == "posix":
@@ -386,10 +358,10 @@ def main():
         if args.apply:
             if not args.archive or not args.tag:
                 raise RepairError("--apply 需要 --archive 私有绝对目录和 --tag 唯一名称")
-            result = repair(args.store, args.archive, args.tag, args.redact_audit)
+            result = repair(args.store, args.archive, args.tag)
         else:
-            if args.archive or args.tag or args.redact_audit:
-                raise RepairError("--archive、--tag 和 --redact-audit 只与 --apply 一起使用")
+            if args.archive or args.tag:
+                raise RepairError("--archive 和 --tag 只与 --apply 一起使用")
             result = {"mode": "dry-run", **scan(args.store)[0]}
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
