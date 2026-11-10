@@ -49,13 +49,17 @@ python -B taskpool.py serve
 
 ## 测试
 
-仓库根目录下的 `verify*.py` 是离线回归检查，可以逐个运行，例如：
+仓库根目录下的 `verify*.py` / `verify*.js` 是离线回归检查。一次运行全部（先构建，再逐项运行并汇总）：
 
 ```sh
-python -B verify_privacy.py
+python -B run_checks.py                 # 除 24 小时 soak 外的全部检查
+python -B run_checks.py --only verify_round,verify_upgrade
+python -B run_checks.py --list
 ```
 
-`ops/verify-release.py` 汇总了发布前需要运行的检查集合。
+也可以逐个运行，例如 `python -B verify_privacy.py`。检查可以在任意工作目录、任意长度的仓库路径下运行：仓库路径过长、放不下升级控制 Unix socket 时，临时项目会自动改放到系统临时目录（也可用环境变量 `TASKPOOL_VERIFY_TMP` 指定）。带 `--report` 的检查不传参数时，报告默认写到 `dist/<检查名>.json`。
+
+`ops/verify-release.py` 汇总了发布前需要运行的检查集合，并保留带源码指纹的结果。
 
 ## 目录结构
 

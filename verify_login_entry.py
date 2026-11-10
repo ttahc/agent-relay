@@ -1,10 +1,10 @@
 """Regression coverage for the v3 anonymous home and password login entry."""
 import json
 from pathlib import Path
-import tempfile
 import zipfile
 
 from verify import ROOT, server, sha
+from verify_support import report_path, scratch
 from verify_round import Browser, setup
 
 
@@ -18,9 +18,7 @@ def password_page(response):
 
 def main():
     archive = ROOT / "dist/task-pool-local.zip"
-    state = ROOT / ".state"
-    state.mkdir(exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="login-entry-", dir=state) as directory:
+    with scratch("login-entry-") as directory:
         project = Path(directory)
         with zipfile.ZipFile(archive) as bundle:
             bundle.extractall(project)
@@ -40,7 +38,7 @@ def main():
     report = {"status": "passed", "artifact_sha256": sha(archive.read_bytes()),
               "checks": ["anonymous-home", "explicit-login", "csrf-password-login",
                          "authenticated-home", "logout-home", "anonymous-home-query"]}
-    Path("dist/login-entry-regression.json").write_text(
+    report_path("login-entry-regression.json").write_text(
         json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(report))
 

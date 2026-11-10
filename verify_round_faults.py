@@ -7,11 +7,11 @@ from pathlib import Path
 import secrets
 import subprocess
 import sys
-import tempfile
 import time
 import zipfile
 
 from verify import ROOT, call, server, sha
+from verify_support import report_path, scratch
 from verify_round import Browser, Client, ai_prepare, bind, browser_admin_api, invitation, post_browser, request_id, setup
 from verify_upgrade import PROJECT, capability, control, register
 
@@ -144,12 +144,11 @@ def exercise(project):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--report", type=Path, required=True)
+    parser.add_argument("--report", type=Path, help="默认 dist/verify_round_faults.json")
     args = parser.parse_args()
+    args.report = args.report or report_path("verify_round_faults.json")
     archive = ROOT / "dist" / "task-pool-local.zip"
-    state = ROOT / ".state"
-    state.mkdir(exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="v3-faults-", dir=state) as name:
+    with scratch("v3-faults-") as name:
         with zipfile.ZipFile(archive) as zipped:
             zipped.extractall(name)
         exercise(Path(name))

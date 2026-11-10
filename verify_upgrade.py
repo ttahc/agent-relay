@@ -8,12 +8,12 @@ import os
 from pathlib import Path
 import subprocess
 import sys
-import tempfile
 import time
 from urllib.parse import urlencode
 import zipfile
 
 from verify import ROOT, browser_client, call, claim_args, command, download, lost_response, server, sha
+from verify_support import report_path, scratch
 
 
 PROJECT = "intranet-task-system"
@@ -366,12 +366,11 @@ def exercise(project):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--report", type=Path, required=True)
+    parser.add_argument("--report", type=Path, help="默认 dist/verify_upgrade.json")
     args = parser.parse_args()
+    args.report = args.report or report_path("verify_upgrade.json")
     archive = ROOT / "dist" / "task-pool-local.zip"
-    state = ROOT / ".state"
-    state.mkdir(exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="verify-upgrade-", dir=state) as directory:
+    with scratch("verify-upgrade-") as directory:
         project = Path(directory)
         with zipfile.ZipFile(archive) as package:
             package.extractall(project)

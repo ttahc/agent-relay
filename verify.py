@@ -12,10 +12,10 @@ from pathlib import Path
 import re
 import subprocess
 import sys
-import tempfile
 from urllib.error import HTTPError
 from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
+from verify_support import report_path, scratch
 import zipfile
 
 
@@ -486,12 +486,11 @@ def validate(project):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--report", type=Path, default=ROOT / "dist" / "phase1-verification.json")
+    parser.add_argument("--report", type=Path, help="默认 dist/phase1-verification.json")
     args = parser.parse_args()
+    args.report = args.report or report_path("phase1-verification.json")
     archive = ROOT / "dist" / "task-pool-local.zip"
-    state = ROOT / ".state"
-    state.mkdir(exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="verify-", dir=state) as directory:
+    with scratch("verify-") as directory:
         project = Path(directory)
         with zipfile.ZipFile(archive) as package:
             package.extractall(project)

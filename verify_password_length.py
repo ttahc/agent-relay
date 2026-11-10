@@ -2,18 +2,16 @@
 from pathlib import Path
 import json
 import re
-import tempfile
 import zipfile
 
 from verify import ROOT, server, sha
+from verify_support import report_path, scratch
 from verify_round import Browser, setup, password_record, browser_admin_api, bind, request_id
 
 
 def main():
     archive = ROOT / "dist/task-pool-local.zip"
-    state = ROOT / ".state"
-    state.mkdir(exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="password-six-", dir=state) as directory:
+    with scratch("password-six-") as directory:
         project = Path(directory)
         with zipfile.ZipFile(archive) as bundle:
             bundle.extractall(project)
@@ -58,7 +56,7 @@ def main():
               "checks": ["registration", "legacy-setup", "password-change", "password-reset",
                          "empty-login", "one-character-login", "five-character-login", "over-128-character-login",
                          "malformed-input-rejected", "existing-password-login", "html-hints"]}
-    Path("dist/password-policy-regression.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
+    report_path("password-policy-regression.json").write_text(json.dumps(result, indent=2), encoding="utf-8")
     print(json.dumps(result))
 
 
