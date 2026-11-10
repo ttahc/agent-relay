@@ -8,6 +8,7 @@ import time
 import zipfile
 
 from .packages import ClientError, MAX_EXPANDED, MAX_FILES, MAX_PACKAGE, artifact_name, fields, string
+from .constants import COORDINATOR, step
 from .upgrade import identifier, version
 from . import delegation
 import 协作执行 as engine
@@ -109,7 +110,6 @@ def _proofs(service, resources):
 def plan(service, actor, action, key, body, state):
     if action not in ACTIONS:
         return None
-    from .service import COORDINATOR, step
     extra = " supersedes_request_id" if "supersedes_request_id" in body else ""
     if action == "execution-fact" and "blocker_ids" in body:
         extra += " blocker_ids"

@@ -11,6 +11,7 @@ import time
 
 from . import ROOT, round_service, upgrade, delegation
 from .accounts import Accounts
+from .constants import ACCESS_TOKEN, ADMIN, COMMITTER, COORDINATOR, ID, Unavailable, step
 from .auth import Passwords
 from .packages import (ClientError, MAX_PACKAGE, SHA, artifact_name, fields, integer, ledger_package,
                        make_delivery, reference, seal_metadata, string, unpack_delivery)
@@ -25,19 +26,10 @@ from 协作存储 import Rejected
 import 协作升级 as rules
 
 
-ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,79}")
-ACCESS_TOKEN = re.compile(r"[A-Za-z0-9_-]{43}")
-ADMIN = "admin"
-COORDINATOR = "pilot-coordinator"
-COMMITTER = "pilot-committer"
 PUBLIC_ACTIONS = {"register", "claim", "handoff", "deliver", "deliver-files", "stop",
                   "return", "resume", "review", "close", "cancel", "withdraw"} | upgrade.ACTIONS | round_service.PUBLIC | {
                     'context-save','segment-open','action-prepare','resource-request','resource-cancel','action-start',
                     'execution-fact','evidence-stash','resource-release'}
-
-
-class Unavailable(RuntimeError):
-    pass
 
 
 @contextmanager
@@ -69,10 +61,6 @@ def store_once(store, path, raw):
     if not publish(target, raw) and target.read_bytes() != raw:
         raise Unavailable("不可变文件内容冲突")
     return target
-
-
-def step(actor, command, payload, expects=None):
-    return {"actor": actor, "command": command, "payload": payload, "expects": expects or {}}
 
 
 def handoff_reference(claim):
