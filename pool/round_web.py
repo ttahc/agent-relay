@@ -10,6 +10,7 @@ import time
 from urllib.parse import quote
 
 from . import round_service, task_pages, upgrade_pages, workbench, workbench_pages
+from . import window_entries_pages
 from .packages import ClientError
 from 协作本轮 import enabled
 from 协作存储 import digest, encoded
@@ -197,6 +198,7 @@ def ai_entry():
     <li>解压后使用 enroll --invite-url，并把完整邀请链接作为一个带引号的参数传入。</li>
     <li>Windows 可用 ops/round-client.ps1，Linux/macOS 使用 Python 3.11 或更新版本运行 ops/round-client.py；填写实际平台、聊天标题和窗口独有的私有凭据文件。</li>
     <li>出现 active、窗口编号和项目权限后完成接入，再申报能力并查看可领取任务。</li></ol>
+  <p>没有邀请、但负责人提供了平台接入点的申请资料时，使用 enroll --apply 提交申请，把显示的配对码告诉负责人，待其在网页同意后再运行 enroll 完成登记。</p>
   <p>旧 JSON 邀请继续使用 enroll --invite。登记后用 capabilities / declare 查看和自报技能，tasks 会显示可见、可领数量及不可领取原因。</p>
   <p>本说明、链接预览与客户端下载无需登录，不消耗邀请码。详细说明在包内 README.md 或 docs/AI客户端操作.md。</p>
 </div></section></main>""")
@@ -373,13 +375,18 @@ def invitations(handler, method, actor, target=None):
                 status, value = service.submit(actor, "ai-revoke", data["request_id"], data,
                                                authorize=lambda: current_actor(handler))
                 handler.web_action_result = value
+            elif op in window_entries_pages.OPERATIONS:
+                try:
+                    issued = window_entries_pages.handle(handler, actor, op, data, lambda: current_actor(handler))
+                except ClientError as error:
+                    status, value = error.status, {"message": str(error)}
             else:
                 raise ClientError("邀请操作无效")
         if status != 200:
             message = value.get("message") or (value.get("steps") or [{}])[-1].get("reason", "请求待确认")
     projects = service.read(actor, "projects")["projects"]
     own = [p for p in projects if p["roles"]]
-    editor = ""
+    editor, selected, owners = "", None, ()
     if own:
         from .httpd import parse_query
         query = parse_query(target.query, {"project"}) if target else {}
@@ -419,7 +426,8 @@ def invitations(handler, method, actor, target=None):
                      f'<p class="muted-text">{format_note}</p>'
                      f'<ul>{windows}</ul><details><summary>邀请操作</summary>{controls}</details></li>')
     notice = f'<p class="form-error" role="status">{escape(message)}；已保留邀请表单，可修正后重试。</p>' if message else ""
-    return work_page("邀请窗口", notice + issued + editor + '<h2>邀请记录</h2><ul class="roster">' + "".join(items) + "</ul>", actor, status)
+    waiting, entries = window_entries_pages.section(service, actor, password_form, selected, owners)
+    return work_page("邀请窗口", notice + issued + waiting + editor + entries + '<h2>邀请记录</h2><ul class="roster">' + "".join(items) + "</ul>", actor, status)
 
 
 def token_rotation(handler, method, actor, target):

@@ -610,8 +610,10 @@ def upgrade_view(service, actor, target):
             return "项目", workbench_pages.project_page(actor, project, tasks, service.read(actor, "activity"), tab)
         return "项目", upgrade_pages.project_page(actor, project, tasks)
     if path == "/executors" and workspace:
-        return "窗口管理", workbench_pages.windows_page(actor, profile, service.read(actor, "window-cards")["executors"], service.read(actor, "overview")["tasks"],
-                                                   parse_qs(target.query).get("archived") == ["1"])
+        from . import window_entries_pages
+        return "窗口管理", window_entries_pages.banner(service, actor) + workbench_pages.windows_page(
+            actor, profile, service.read(actor, "window-cards")["executors"], service.read(actor, "overview")["tasks"],
+            parse_qs(target.query).get("archived") == ["1"])
     if path == "/executors":
         return "窗口目录", upgrade_pages.executor_index(actor, profile, service.read(actor, "executors")["executors"], service.round_enabled())
     if path.startswith("/executors/"):

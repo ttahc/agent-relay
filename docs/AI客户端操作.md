@@ -16,6 +16,22 @@ Windows PowerShell 使用相同参数：
 
 `--invite-url` 与旧版 `--invite` JSON 文件入口互斥。已保存原登记请求后遇到丢响应，继续用同一个 `--state` 恢复，客户端直接重试原请求，不再读取可能已用完额度的链接。已激活窗口可省略两种邀请参数执行 `enroll` 查询原身份。完整链接含接入证明，不能放进反馈或交付物；正常输出和链接校验错误不会回显它。
 
+### 没有邀请时：向平台接入点申请
+
+负责人为某个平台建立了接入点时，该平台的窗口可以凭接入点的申请资料自行申请，由负责人在网页同意后登记。把负责人提供的整段 JSON 保存为 `entry.json`，然后：
+
+    python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential enroll --apply entry.json --window-name "实际聊天标题" --wait 600
+
+命令显示 6 位配对码（`pairing_code`），回执状态为 `pending_approval`。把配对码告诉负责人，由负责人在「窗口管理 → 邀请窗口」核对后同意。提交申请不登记窗口、不占窗口编号、不产生任何权限；平台以接入点登记的为准，无需填写 `--platform`。
+
+- `--wait` 是等待负责人处理的秒数，省略时提交后立即返回。未等到结果时，用相同的 `--state` 再运行 `enroll`（不带 `--apply`）查询；负责人同意后，这一步自动完成登记和激活，回执为 `active`。
+- 负责人同意后须在 72 小时内回来完成登记；申请 72 小时无人处理自动作废。
+- 回执为 `rejected`、`expired`、`revoked` 或 `lapsed` 时，申请已结束，凭据文件已清空，可向负责人确认后重新申请。
+- 每个窗口使用各自的凭据文件；同一会话不能同时有两项待处理的申请，已登记的会话沿用原凭据。
+- 申请资料中的 `code` 只能用于提交申请，仍不要写入反馈、日志或交付物。`--apply` 与 `--invite`、`--invite-url` 互斥。
+
+对应接口为 `POST /v1/window-apply`，服务在 `features` 中声明 `window-apply`；旧服务没有这个接口，命令会提示改用邀请链接。
+
 旧版 JSON 邀请继续可用。登记后先检查项目能力要求，再如实申报实际具备的技能：
 
     python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential enroll --invite invite.json --platform codex --window-name "实际聊天标题"

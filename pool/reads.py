@@ -50,6 +50,7 @@ def features(r, argument):
     result['features']['list-summary'] = True
     if r.round_enabled:
         result['features']['wait'] = True
+        result['features']['window-apply'] = True
         result['wait'] = {'max_seconds': wakeups.MAX_HOLD}
     return result
 
