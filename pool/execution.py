@@ -32,17 +32,23 @@ FIELDS = {
 }
 PREFIXES = {"context-save": "ctx-", "segment-open": "seg-", "action-prepare": "act-", "resource-request": "rq-",
             "execution-fact": "fact-", "evidence-stash": "stash-"}
+IDENTIFIERS = ("task_id", "claim_id", "context_id", "segment_id", "action_id", "resource_request_id", "grant_id", "permit_id")
+
+
+def _row(state, table, key):
+    """A stored execution record, or {} when the key is absent or is not text."""
+    rows = state.get("security", {}).get("execution", {}).get(table, {})
+    return rows.get(key) or {} if isinstance(key, str) else {}
 
 
 def _binding(state, action, p):
-    data = state.get("security", {}).get("execution", {})
+    """The record a request is bound to. Also used for rejected requests, so any body shape is accepted."""
     if action == "action-prepare":
-        return data.get("segments", {}).get(p["segment_id"], {})
+        return _row(state, "segments", p.get("segment_id"))
     if action == "resource-cancel":
-        request = data.get("resource_requests", {}).get(p["resource_request_id"], {})
-        return data.get("actions", {}).get(request.get("action_id"), {})
-    if "action_id" in p and p["action_id"]:
-        return data.get("actions", {}).get(p["action_id"], p)
+        return _row(state, "actions", _row(state, "resource_requests", p.get("resource_request_id")).get("action_id"))
+    if isinstance(p.get("action_id"), str) and p["action_id"]:
+        return state.get("security", {}).get("execution", {}).get("actions", {}).get(p["action_id"], p)
     return p
 
 
@@ -115,6 +121,9 @@ def plan(service, actor, action, key, body, state):
     if action == "execution-fact" and "blocker_ids" in body:
         extra += " blocker_ids"
     fields(body, "request_id " + FIELDS[action] + extra)
+    if any(body.get(name) and not isinstance(body[name], str) for name in IDENTIFIERS) or not (
+            isinstance(body.get("blocker_ids", []), list) and all(isinstance(key, str) for key in body.get("blocker_ids", []))):
+        raise ClientError("编号字段须为文本")
     p = {name: deepcopy(value) for name, value in body.items() if name != "request_id"}
     p["op"] = action
     if "supersedes_request_id" in p:
@@ -197,6 +206,49 @@ def features(state):
             "resource_policy": "atomic-set/conflict-fifo/unknown-blocks", "unknown_is_release": False}
 
 
+def can_profile(state, actor, executor):
+    """Who reads a window's saved configurations: the window, its responsible person, an administrator."""
+    return actor == executor or rules.system_admin(state, actor) or actor == rules.responsible(state, executor)
+
+
+def reporter_kind(state, actor, row):
+    """How actor may report on an action or segment: as its owner, a managing person, a trusted adapter, or not at all."""
+    if row["executor_id"] == actor:
+        return "owner"
+    task = state.get("tasks", {}).get(row["task_id"], {})
+    if (rules.identity(state, actor) or {}).get("kind") == "human" and rules.manager(state, rules.task_project(task), actor):
+        return "human"
+    adapters = state.get("security", {}).get("execution", {}).get("adapters", {})
+    if any(item.get("trusted") and item.get("actor") == actor and
+           (row["claim_id"] in item.get("claims", []) or item.get("executor_id") == row["executor_id"])
+           for item in adapters.values()):
+        return "adapter"
+    return None
+
+
+def audit_context(state, actor, body):
+    """The saved configuration a request's audit record may carry; None means the requester's own default.
+
+    A request can name any configuration, directly or through a segment or an action, and rejected
+    requests are recorded too. Only a configuration the requester may read is kept, or the one of an
+    action or segment the requester may report on.
+    """
+    action = _row(state, "actions", body.get("action_id"))
+    segment = _row(state, "segments", body.get("segment_id") or action.get("segment_id"))
+    direct = body.get("context_id") or body.get("context_version")
+    context_id = body.get("context_id") or segment.get("context_id")
+    context_version = body.get("context_version") or segment.get("context_version")
+    named = _row(state, "contexts", str(context_id) + ":" + str(context_version)) if context_id and context_version else {}
+    if not named:
+        return None
+    if can_profile(state, actor, named["executor_id"]):
+        return named
+    source = action or segment
+    if not direct and source and source["executor_id"] == named["executor_id"] and reporter_kind(state, actor, source):
+        return named
+    return None
+
+
 def _can_view(state, actor, record):
     claim = state.get("claims", {}).get(record.get("claim_id"), {})
     if actor == record.get("executor_id", claim.get("origin")) or rules.system_admin(state, actor):
@@ -220,8 +272,8 @@ def read(state, actor, query=None):
         raise ClientError("执行查询条件无效")
     data = state.get("security", {}).get("execution", {})
     target = query.get("executor_id", actor)
-    can_profile = actor == target or rules.system_admin(state, actor) or actor == rules.responsible(state, target)
-    contexts = [deepcopy(row) for row in data.get("contexts", {}).values() if row["executor_id"] == target and can_profile]
+    profile = can_profile(state, actor, target)
+    contexts = [deepcopy(row) for row in data.get("contexts", {}).values() if row["executor_id"] == target and profile]
     selected_action = data.get("actions", {}).get(query.get("action_id"), {})
 
     def selected(row):
@@ -231,22 +283,18 @@ def read(state, actor, query=None):
             for key in ("task_id", "claim_id", "action_id")) and (bool(query) or
                 row.get("executor_id", state.get("claims", {}).get(row.get("claim_id"), {}).get("origin")) == actor)
     result = {"schema": security_schema(state, 3), "actor": actor, "executor_id": target,
-              "can_write": actor == target, "default_context": deepcopy(data.get("defaults", {}).get(target)) if can_profile else None,
+              "can_write": actor == target, "default_context": deepcopy(data.get("defaults", {}).get(target)) if profile else None,
               "contexts": [{**row, "can_write": actor == row["executor_id"]} for row in contexts]}
     result["resource_domains"] = sorted(getattr(query, "resource_domains", []))
     for table in ("segments", "actions", "resource_requests", "grants", "facts", "stashes", "legacy", "blockers"):
         result[table] = [_public(row) for row in data.get(table, {}).values() if selected(row)]
     result["physical_blockers"] = [deepcopy(row) for row in state.get("security", {}).get("physical_blockers", {}).values() if selected(row)]
     for row in result["actions"]:
-        own = row["executor_id"] == actor
-        task = state.get("tasks", {}).get(row["task_id"], {})
-        human = (rules.identity(state, actor) or {}).get("kind") == "human" and rules.manager(state, rules.task_project(task), actor)
-        adapter = any(item.get("trusted") and item.get("actor") == actor and
-                      (row["claim_id"] in item.get("claims", []) or item.get("executor_id") == row["executor_id"])
-                      for item in data.get("adapters", {}).values())
+        reporter = reporter_kind(state, actor, row)
+        own = reporter == "owner"
         row.update(can_prepare=own, can_request=own and row["state"] == "prepared", can_start=own and row["state"] == "granted",
-                   can_report=own or human or adapter, can_release=(own or human or adapter) and bool(row.get("grant_id")),
-                   reporter_kind="owner" if own else "human" if human else "adapter" if adapter else None)
+                   can_report=bool(reporter), can_release=bool(reporter) and bool(row.get("grant_id")),
+                   reporter_kind=reporter)
     for row in result["legacy"] + result["physical_blockers"]:
         claim = state.get("claims", {}).get(row.get("claim_id"), {})
         task = state.get("tasks", {}).get(claim.get("task_id"), {})

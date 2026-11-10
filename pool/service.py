@@ -247,8 +247,8 @@ class Service:
         task, project = task or real_task, real_project or project
         from . import execution
         if action in execution.ACTIONS:
-            binding = execution._binding(state, action, body)
-            resolved_task = state['tasks'].get(binding.get('task_id'))
+            bound = execution._binding(state, action, body).get('task_id')
+            resolved_task = state['tasks'].get(bound) if isinstance(bound, str) else None
             if resolved_task:
                 task = resolved_task['task_id']
                 project = rules.task_project(resolved_task)
@@ -270,13 +270,7 @@ class Service:
         if security_schema(state) >= 5 and action in PUBLIC_ACTIONS:
             from 协作执行 import default_context
             selected = default_context(state, actor)
-            data = state['security'].get('execution', {})
-            action_row = data.get('actions', {}).get(body.get('action_id'), {})
-            segment = data.get('segments', {}).get(body.get('segment_id') or action_row.get('segment_id'), {})
-            cid = body.get('context_id') or segment.get('context_id')
-            cversion = body.get('context_version') or segment.get('context_version')
-            if cid and cversion:
-                selected = data.get('contexts', {}).get(str(cid) + ':' + str(cversion), selected)
+            selected = execution.audit_context(state, actor, body) or selected
             details.update(source_platform=subject.get('platform'), execution_context=selected,
                            model=selected.get('config', {}).get('model'), platform=selected.get('config', {}).get('platform'))
             if action in {'execution-fact', 'evidence-stash'} and not body.get('action_id'):
