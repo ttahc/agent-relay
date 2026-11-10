@@ -20,7 +20,8 @@ def launch_arguments(record, image, name, archive, tag, config_sha=None):
         args += ["--env", "TASKPOOL_LAUNCH_CONFIG_SHA256=" + config_sha]
     for key, value in {**config.get("Labels", {}), "upgrade": tag}.items():
         args += ["--label", key + "=" + value]
-    for field, flag in (("User", "--user"), ("WorkingDir", "--workdir"), ("Hostname", "--hostname"), ("StopSignal", "--stop-signal")):
+    for field, flag in (("User", "--user"), ("WorkingDir", "--workdir"), ("Hostname", "--hostname"),
+                        ("StopSignal", "--stop-signal")):
         if config.get(field):
             args += [flag, str(config[field])]
     if config.get("Entrypoint"):
@@ -138,7 +139,8 @@ def main():
         if len(raw) > 4 * 1024 * 1024:
             raise ValueError("启动配置超出预算")
         record = json.loads(raw)
-        os.execvp("podman", launch_arguments(record, args.image, args.name, args.archive, args.tag, hashlib.sha256(raw).hexdigest()))
+        os.execvp("podman", launch_arguments(record, args.image, args.name, args.archive, args.tag,
+                                             hashlib.sha256(raw).hexdigest()))
 
 
 if __name__ == "__main__":

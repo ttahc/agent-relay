@@ -8,7 +8,8 @@ from . import task_pages as pages, upgrade_pages as ui
 from .packages import ClientError, strict_json
 
 PATH = re.compile(r"/executors/([A-Za-z0-9][A-Za-z0-9_-]{0,79})/execution")
-ACTIONS = {"context-save", "segment-open", "action-prepare", "resource-request", "resource-cancel", "action-start", "execution-fact", "resource-release"}
+ACTIONS = {"context-save", "segment-open", "action-prepare", "resource-request", "resource-cancel", "action-start",
+           "execution-fact", "resource-release"}
 DIMENSIONS = (("platform", "调用平台"), ("adapter", "执行方式"), ("model", "模型"), ("reasoning", "推理配置"),
               ("tools_version", "工具集合版本"), ("permissions_version", "权限范围版本"), ("environment", "环境标识"))
 STATES = {"prepared": "已准备", "queued": "排队等待", "granted": "资源已授予", "start-authorized": "已有开始许可，实际开工待回报",
@@ -26,8 +27,9 @@ def evidence():
 
 
 def resource_text(resources):
-    return "、".join(f'{row.get("id", "未标明资源")}（{"只读" if row.get("mode") == "read" else "写入"} · {row.get("domain", "原记录未标明域")}）'
-                    for row in resources) or "无资源申请"
+    return "、".join(
+        f'{row.get("id", "未标明资源")}（{"只读" if row.get("mode") == "read" else "写入"} · {row.get("domain", "原记录未标明域")}）'
+        for row in resources) or "无资源申请"
 
 
 def config_form(row=None):
@@ -36,9 +38,13 @@ def config_form(row=None):
     fields = fixed({"context_id": row.get("context_id"), "version": row.get("version", 0)})
     for key, title in DIMENSIONS:
         value = config.get(key, "manual" if key == "adapter" else "unknown")
-        editor = ui.selection(key, title, [("manual", "人工确认"), ("local-files", "本地文件适配器"), ("isolated-worktree", "隔离工作树适配器")], value) if key == "adapter" else ui.input_field(key, title, value, size=160)
+        editor = (ui.selection(key, title, [("manual", "人工确认"), ("local-files", "本地文件适配器"),
+                                            ("isolated-worktree", "隔离工作树适配器")], value)
+                  if key == "adapter" else ui.input_field(key, title, value, size=160))
         source = (config.get("sources") or {}).get(key, "reported" if key == "adapter" else "unknown")
-        fields += '<div class="two">' + editor + ui.selection("source-" + key, "信息来源", [("unknown", "未知"), ("reported", "本窗口申报")], source) + '</div>'
+        fields += ('<div class="two">' + editor
+                   + ui.selection("source-" + key, "信息来源", [("unknown", "未知"), ("reported", "本窗口申报")], source)
+                   + '</div>')
     fields += ui.selection("make_default", "用于新的动作", [("no", "保留为可选配置"), ("yes", "设为新动作默认配置")], "no")
     return pages.form("context-save", "保存新配置版本", contents=fields)
 
@@ -82,18 +88,24 @@ def render(actor, name, data, features, tasks, claims, domains):
     for row in contexts:
         config = row["config"]
         chosen = default.get("context_id") == row["context_id"] and default.get("version") == row["version"]
-        body += (f'<article><h4>{e(config.get("model", "未知"))} · 配置版本 {row["version"]}{" · 当前默认" if chosen else ""}</h4>'
-                 '<dl>' + "".join(f'<dt>{title}</dt><dd>{e(str(config.get(key, "未知")))} · {"本窗口申报" if config.get("sources", {}).get(key) == "reported" else "未知"}</dd>' for key, title in DIMENSIONS) + '</dl>')
+        body += (
+            f'<article><h4>{e(config.get("model", "未知"))} · 配置版本 {row["version"]}{" · 当前默认" if chosen else ""}</h4>'
+            '<dl>' + "".join(
+                f'<dt>{title}</dt><dd>{e(str(config.get(key, "未知")))} · '
+                f'{"本窗口申报" if config.get("sources", {}).get(key) == "reported" else "未知"}</dd>'
+                for key, title in DIMENSIONS) + '</dl>')
         if enabled and row.get("can_write") and latest[row["context_id"]]["version"] == row["version"]:
             body += ui.block("基于此配置创建新版本", config_form(row))
         body += '</article>'
     if not contexts:
         body += '<p>暂无执行配置。</p>'
     body += '</section><section class="box"><h3>执行段（固定领取、范围和配置版本）</h3>'
-    choices = [(row["context_id"] + ":" + str(row["version"]), f'{row["config"].get("model", "未知")} · v{row["version"]} · {row["context_id"]}') for row in contexts]
+    choices = [(row["context_id"] + ":" + str(row["version"]),
+                f'{row["config"].get("model", "未知")} · v{row["version"]} · {row["context_id"]}') for row in contexts]
     if enabled and own and choices:
         for claim in claims:
-            fields = fixed({"task_id": claim["task_id"], "claim_id": claim["claim_id"], "scope_version": claim["W"]["scope"], "epoch": claim["epoch"]})
+            fields = fixed({"task_id": claim["task_id"], "claim_id": claim["claim_id"],
+                            "scope_version": claim["W"]["scope"], "epoch": claim["epoch"]})
             fields += ui.selection("context_ref", "本段使用的配置", choices)
             body += ui.block("为 " + claim["task_id"] + " 新建执行段", pages.form("segment-open", "创建执行段", contents=fields))
     for segment in data.get("segments", []):
@@ -101,11 +113,13 @@ def render(actor, name, data, features, tasks, claims, domains):
         body += f'<p>范围 {segment["scope_version"]} · 配置 v{segment["context_version"]}</p>'
         context = configs.get((segment["context_id"], segment["context_version"]))
         if enabled and own and context:
-            fields = fixed({"segment_id": segment["id"], "version": segment["version"], "adapter_id": context["config"]["adapter"]})
+            fields = fixed({"segment_id": segment["id"], "version": segment["version"],
+                            "adapter_id": context["config"]["adapter"]})
             fields += ui.text_field("description", "本次实际动作及预期结果")
             resources = by_task.get(segment["task_id"], {}).get("resources", [])
             for index, row in enumerate(resources):
-                fields += (f'<label class="check"><input type="checkbox" name="pick-{index}" value="{e(json.dumps({"id": row["id"], "mode": row["mode"]}), quote=True)}">'
+                fields += (f'<label class="check"><input type="checkbox" name="pick-{index}" '
+                           f'value="{e(json.dumps({"id": row["id"], "mode": row["mode"]}), quote=True)}">'
                            f'{e(row["id"])} · {"只读" if row["mode"] == "read" else "写入"}</label>')
             fields += ui.selection("domain", "资源环境", [(key, key) for key in domains])
             fields += '<p class="muted-text">只选择本动作完整需要的资源。未受信解析的环境按保守域处理，不表示已隔离外部写入。</p>'
@@ -114,27 +128,41 @@ def render(actor, name, data, features, tasks, claims, domains):
     body += '</section><section class="box"><h3>动作、资源许可与实际事实</h3><p>开始许可不会启动外部程序；只有实际回报才表示开工。unknown 不等于已结束。</p>'
     grants = {row["id"]: row for row in data.get("grants", [])}
     for row in data.get("actions", []):
-        body += f'<article><h4>{e(row["task_id"])} · {e(row.get("description", row["id"]))}</h4><p>{e(STATES.get(row["state"], row["state"]))}</p><p>{e(resource_text(row.get("resources", [])))}</p>'
+        body += (f'<article><h4>{e(row["task_id"])} · {e(row.get("description", row["id"]))}</h4>'
+                 f'<p>{e(STATES.get(row["state"], row["state"]))}</p>'
+                 f'<p>{e(resource_text(row.get("resources", [])))}</p>')
         if enabled and row.get("can_request"):
-            body += pages.form("resource-request", "申请本动作完整资源集合", {"action_id": row["id"], "version": row["version"], "resources": json.dumps(row["resources"])})
+            body += pages.form("resource-request", "申请本动作完整资源集合",
+                               {"action_id": row["id"], "version": row["version"],
+                                "resources": json.dumps(row["resources"])})
         grant = grants.get(row.get("grant_id"))
         if enabled and row.get("can_start") and grant:
-            body += pages.form("action-start", "申请本动作开始许可", {"action_id": row["id"], "version": row["version"], "grant_id": grant["id"], "generation": grant["generation"]})
+            body += pages.form("action-start", "申请本动作开始许可",
+                               {"action_id": row["id"], "version": row["version"], "grant_id": grant["id"],
+                                "generation": grant["generation"]})
         if row.get("can_report"):
             body += ui.block("登记实际事实或结束依据", fact_form(row))
         if row.get("can_release") and grant:
-            fields = fixed({"action_id": row["id"], "grant_id": grant["id"], "generation": grant["generation"], "version": grant["version"]}) + evidence()
-            fields += ui.selection("basis", "归还依据", [("unconfirmed", "尚不能确认物理结束（继续阻挡）"), ("human-isolation", "有权人员已核对停止或隔离证据"), ("adapter-confirmed", "受信适配器已证明安全结束")], "unconfirmed")
+            fields = fixed({"action_id": row["id"], "grant_id": grant["id"], "generation": grant["generation"],
+                            "version": grant["version"]}) + evidence()
+            fields += ui.selection("basis", "归还依据", [
+                ("unconfirmed", "尚不能确认物理结束（继续阻挡）"), ("human-isolation", "有权人员已核对停止或隔离证据"),
+                ("adapter-confirmed", "受信适配器已证明安全结束")], "unconfirmed")
             body += ui.block("归还逻辑预约与核对物理占用", pages.form("resource-release", "按所述依据归还", contents=fields))
         body += '</article>'
     body += '</section><section class="box"><h3>资源队列</h3>'
     for row in data.get("resource_requests", []):
-        body += f'<p>顺序 {row.get("sequence", "—")} · {e(STATES.get(row["state"], row["state"]))} · {e(resource_text(row.get("resources", [])))}</p>'
+        body += (f'<p>顺序 {row.get("sequence", "—")} · {e(STATES.get(row["state"], row["state"]))} · '
+                 f'{e(resource_text(row.get("resources", [])))}</p>')
         if enabled and own and row["state"] == "queued":
-            body += pages.form("resource-cancel", "取消此次等待（不停止程序）", {"resource_request_id": row["id"], "version": row["version"]})
+            body += pages.form("resource-cancel", "取消此次等待（不停止程序）",
+                               {"resource_request_id": row["id"], "version": row["version"]})
     body += '</section><section class="box"><h3>实际占用、旧领取与 unknown 阻挡</h3>'
-    for row in [*data.get("grants", []), *data.get("legacy", []), *data.get("blockers", []), *data.get("physical_blockers", [])]:
-        body += f'<p>{e(str(row.get("task_id") or row.get("claim_id") or row["id"]))} · {e(STATES.get(row.get("physical"), str(row.get("physical") or "待核")))} · {e(resource_text(row.get("resources", [])))}</p>'
+    for row in [*data.get("grants", []), *data.get("legacy", []), *data.get("blockers", []),
+                *data.get("physical_blockers", [])]:
+        body += (f'<p>{e(str(row.get("task_id") or row.get("claim_id") or row["id"]))} · '
+                 f'{e(STATES.get(row.get("physical"), str(row.get("physical") or "待核")))} · '
+                 f'{e(resource_text(row.get("resources", [])))}</p>')
         if row.get("binding_notice"):
             body += f'<p class="muted-text">{e(row["binding_notice"])}</p>'
         if row.get("can_report") and row.get("claim_id"):
@@ -154,7 +182,8 @@ def _body(action, values):
     if action == "context-save":
         config = {key: data.pop(key) for key, _ in DIMENSIONS}
         config["sources"] = {key: data.pop("source-" + key) for key, _ in DIMENSIONS}
-        data.update(config=config, context_id=data["context_id"] or None, make_default=data.pop("make_default") == "yes")
+        data.update(config=config, context_id=data["context_id"] or None,
+                    make_default=data.pop("make_default") == "yes")
     elif action == "segment-open":
         try:
             context, version = data.pop("context_ref").rsplit(":", 1)
@@ -201,7 +230,8 @@ def dispatch(handler, method, target, actor):
     if data.get("can_write"):
         for task in tasks:
             if task.get("holder") == name:
-                claims.extend(claim for claim in service.read(actor, "task", task["task_id"])["claims"] if claim["origin"] == name and claim["L"] == "active")
+                claims.extend(claim for claim in service.read(actor, "task", task["task_id"])["claims"]
+                              if claim["origin"] == name and claim["L"] == "active")
     domains = sorted(getattr(service, "execution_roots", {})) or ["manual-unverified"]
     from .web import html_page
     return html_page("执行配置与资源 · 任务协作平台", render(actor, name, data, features, tasks, claims, domains))

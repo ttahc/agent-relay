@@ -22,14 +22,19 @@ def _cap_context(state, actor, record, values=None, create=False, now=0, event_i
         key = str(values["context_id"]) + ":" + str(values["context_version"])
         if key not in state.get("security", {}).get("execution", {}).get("contexts", {}):
             initial = execution.default_context(state, actor)
-            rules.require(initial["context_id"] == values["context_id"] and initial["version"] == values["context_version"], "申请绑定的配置不存在")
+            rules.require(initial["context_id"] == values["context_id"]
+                          and initial["version"] == values["context_version"], "申请绑定的配置不存在")
             execution.default_context(state, actor, True, now, event_id)
-    selected = execution.context_record(state, actor, {"context_id": values["context_id"], "version": values["context_version"]}) if values.get("context_id") else execution.default_context(state, actor, create, now, event_id)
-    rules.require(record.get("kind") != "environment" or record.get("environment") == selected["config"]["environment"], "环境证据须对应所选配置，不自动改绑")
+    selected = (execution.context_record(state, actor,
+                                         {"context_id": values["context_id"], "version": values["context_version"]})
+                if values.get("context_id") else execution.default_context(state, actor, create, now, event_id))
+    rules.require(record.get("kind") != "environment" or record.get("environment") == selected["config"]["environment"],
+                  "环境证据须对应所选配置，不自动改绑")
     requested = values.get("context_dimensions")
     if requested is None and record.get("applicability"):
         requested = list(record["applicability"]["dependencies"])
-    return execution.bind_evidence(state, actor, record, selected, values.get("project_id"), values.get("capability"), requested)
+    return execution.bind_evidence(state, actor, record, selected, values.get("project_id"),
+                                   values.get("capability"), requested)
 
 
 def allowed(state, actor, name):
@@ -79,7 +84,8 @@ def view(state, actor, name):
 
 def payload(state, actor, action, body, key):
     if action == "window-admin":
-        fields(body, "request_id name version operation reason" + (" owner" if body.get("operation") == "transfer" else ""))
+        fields(body, "request_id name version operation reason"
+               + (" owner" if body.get("operation") == "transfer" else ""))
         operation = body["operation"]
         if not isinstance(operation, str) or operation not in OPERATIONS:
             raise ClientError("窗口处置操作无效")
@@ -91,7 +97,8 @@ def payload(state, actor, action, body, key):
         fields(body, "request_id project_id capability kind value evidence environment expires" + context_fields +
                (" context_dimensions" if "context_dimensions" in body else ""))
         cap = string(body["capability"], "能力标识", 48)
-        if not rules.CAP_ID.fullmatch(cap) or not isinstance(body["kind"], str) or body["kind"] not in {"skill", "environment"}:
+        if (not rules.CAP_ID.fullmatch(cap) or not isinstance(body["kind"], str)
+            or body["kind"] not in {"skill", "environment"}):
             raise ClientError("能力标识或类别无效")
         fields(body["evidence"], "note sha256")
         record = {"kind": body["kind"], "value": string(body["value"], "能力值", 100),
@@ -141,9 +148,11 @@ def apply(state, p, actor, now, event_id):
                   "处置操作或依据无效")
     if operation == "transfer":
         owner = rules.identity(state, p.get("owner")) or {}
-        rules.require(owner.get("kind") == "human" and rules.active(state, p.get("owner")) and p["owner"] != subject["owner"],
+        rules.require(owner.get("kind") == "human" and rules.active(state, p.get("owner"))
+                      and p["owner"] != subject["owner"],
                       "须选择另一位有效人员作为新责任人")
-        rules.require(not any(c["origin"] == name and (c["L"] == "active" or c.get("R")) for c in state["claims"].values()),
+        rules.require(not any(c["origin"] == name and (c["L"] == "active" or c.get("R"))
+                              for c in state["claims"].values()),
                       "窗口仍有活动领取、待验交付或资源占用；先完成停止、交接或验收再更换责任人")
         rules.require(not _execution_occupancies(state, name),
                       '窗口还有未收口动作或物理占用；结束领取不代替实际收尾，暂不能更换责任人')
@@ -161,7 +170,8 @@ def apply(state, p, actor, now, event_id):
         subject.update(status={"pause": "paused", "archive": "archived"}.get(operation, "disabled"),
                        credential=subject["credential"] + 1, credential_reason=p["reason"], token_expires=0)
         for key, enrollment in state["round"].items():
-            if key.startswith("enrollment:") and enrollment.get("name") == name and enrollment.get("state") == "pending":
+            if (key.startswith("enrollment:") and enrollment.get("name") == name
+                and enrollment.get("state") == "pending"):
                 enrollment.update(state="revoked", terminal_event=event_id)
     state["round"]["window-event:" + event_id] = {"name": name, "operation": operation, "by": actor,
         "previous_owner": previous_owner, "owner": subject["owner"], "reason": p["reason"], "at": now,
@@ -176,18 +186,23 @@ def capability_action(state, p, actor, now, event_id):
         name, project, record = p.get("name"), p.get("project_id"), p.get("record", {})
         subject = rules.identity(state, name) or {}
         rules.require(actor == name and subject.get("kind") in {"executor", "human"} and
-                      rules.active(state, name) and bool(rules.roles(state, project, name)), "须由有效项目成员为自己申请核实", "intent-final")
-        rules.require(key not in records and isinstance(p.get("capability"), str) and rules.CAP_ID.fullmatch(p["capability"]),
+                      rules.active(state, name) and bool(rules.roles(state, project, name)),
+                      "须由有效项目成员为自己申请核实", "intent-final")
+        rules.require(key not in records and isinstance(p.get("capability"), str)
+                      and rules.CAP_ID.fullmatch(p["capability"]),
                       "核实申请或能力编号无效")
         rules.require(record.get("kind") in {"skill", "environment"} and isinstance(record.get("environment"), str) and
                       isinstance(record.get("value"), str) and 0 < len(record["value"]) <= 100 and
                       type(record.get("expires")) is int and now < record["expires"] <= now + 366 * 86400,
                       "核实范围、环境或有效期无效")
         evidence = record.get("evidence", {})
-        rules.require(isinstance(evidence, dict) and isinstance(evidence.get("sha256"), str) and rules.SHA.fullmatch(evidence["sha256"]) and
-                      isinstance(evidence.get("note"), str) and 0 < len(evidence["note"].strip()) <= 2000, "须提供证据说明和 SHA256")
+        rules.require(isinstance(evidence, dict) and isinstance(evidence.get("sha256"), str) and
+                      rules.SHA.fullmatch(evidence["sha256"]) and
+                      isinstance(evidence.get("note"), str) and 0 < len(evidence["note"].strip()) <= 2000,
+                      "须提供证据说明和 SHA256")
         is_v5 = security_schema(state, 3) >= 5
-        rules.require(is_v5 or record["kind"] != "environment" or record["environment"] == subject.get("environment", "human"),
+        rules.require(is_v5 or record["kind"] != "environment"
+                      or record["environment"] == subject.get("environment", "human"),
                       "环境证据与当前窗口环境不符")
         capkey = f"cap:{project}:{name}:{p['capability']}"
         binding_values = {**record, "project_id": project, "capability": p["capability"]}
@@ -199,7 +214,8 @@ def capability_action(state, p, actor, now, event_id):
     request = records.get(key)
     rules.require(request and actor in reviewers(state, request["project_id"], request["name"]),
                   "须由另一位本项目管理者或验收人核实", "intent-final")
-    rules.require(request["state"] == "pending" and type(p.get("version")) is int and request["version"] == p["version"],
+    rules.require(request["state"] == "pending" and type(p.get("version")) is int
+                  and request["version"] == p["version"],
                   "核实申请已处理或版本已变化")
     rules.require(p.get("decision") in {"approve", "reject"} and p.get("level") in {"probed", "verified"} and
                   isinstance(p.get("reason"), str) and 0 < len(p["reason"].strip()) <= 2000, "核实结论或依据无效")
@@ -209,15 +225,19 @@ def capability_action(state, p, actor, now, event_id):
         is_v5 = security_schema(state, 3) >= 5
         if is_v5:
             import 协作执行 as execution
-            selected = execution.context_record(state, request["name"], {"context_id": record["context_id"], "version": record["context_version"]})
-            bound = execution.bind_evidence(state, request["name"], record, selected, request["project_id"], request["capability"],
-                                           list(record["applicability"]["dependencies"]), verified=True)
+            selected = execution.context_record(
+                state, request["name"], {"context_id": record["context_id"], "version": record["context_version"]})
+            bound = execution.bind_evidence(state, request["name"], record, selected, request["project_id"],
+                                            request["capability"], list(record["applicability"]["dependencies"]),
+                                            verified=True)
             applicable = execution.match_context(state, request["name"], {**record, **bound}, selected,
-                                                  {"id": request["capability"], "project_id": request["project_id"], "evidence": p["level"]})
+                                                  {"id": request["capability"], "project_id": request["project_id"],
+                                                   "evidence": p["level"]})
         else:
             bound = {}
             applicable = record["kind"] != "environment" or record["environment"] == subject.get("environment", "human")
-        rules.require(rules.active(state, request["name"]) and rules.roles(state, request["project_id"], request["name"]) and
+        rules.require(rules.active(state, request["name"]) and
+                      rules.roles(state, request["project_id"], request["name"]) and
                       record["expires"] > now and applicable,
                       "申请者权限、环境或证据有效期已变化")
         capkey = f"cap:{request['project_id']}:{request['name']}:{request['capability']}"
@@ -227,7 +247,8 @@ def capability_action(state, p, actor, now, event_id):
                                  "version": request["capability_version"] + 1, "verification_id": request["id"]}
         # Verification changes later eligibility; it does not stop actual running work.
     request.update(state="approved" if p["decision"] == "approve" else "rejected", version=request["version"] + 1,
-                   resolved_by=actor, resolved_at=now, resolution=p["reason"], level=p["level"], resolution_event=event_id)
+                   resolved_by=actor, resolved_at=now, resolution=p["reason"], level=p["level"],
+                   resolution_event=event_id)
 
 
 def requests_view(state, actor):

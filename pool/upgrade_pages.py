@@ -15,7 +15,8 @@ def panel(actor, title, content):
 
 def input_field(name, label, value="", required=True, size=200):
     need = " required" if required else ""
-    return f'<label>{label}<input name="{name}" maxlength="{size}" value="{escape(str(value), quote=True)}"{need}></label>'
+    return (f'<label>{label}<input name="{name}" maxlength="{size}" '
+            f'value="{escape(str(value), quote=True)}"{need}></label>')
 
 
 def selection(name, label, options, current=None):
@@ -50,7 +51,8 @@ def identity_picker(name, label, candidates, current="", optional=False):
     if current and current not in {key for key, _ in options}:
         note += '<small class="form-error">保留了原值；该身份当前不可选，请核对状态和权限后重新选择。</small>'
     return ('<div class="identity-picker" data-identity-picker><input type="search" data-picker-search '
-            f'placeholder="搜索{escape(label, quote=True)}" aria-label="搜索{escape(label, quote=True)}">{picker}{note}</div>')
+            f'placeholder="搜索{escape(label, quote=True)}" aria-label="搜索{escape(label, quote=True)}">'
+            f'{picker}{note}</div>')
 
 
 def text_field(name, label, value="", size=2000, required=True):
@@ -90,14 +92,16 @@ def project_page(actor, data, tasks):
     round_mode = data.get("automation") is not None
     manage = ""
     if "manager" in data["roles"]:
-        manage = block("更新项目名称", pages.form("project-save", "保存项目", {"project_id": data["id"], "version": data["version"]},
+        manage = block("更新项目名称",
+                       pages.form("project-save", "保存项目", {"project_id": data["id"], "version": data["version"]},
                        input_field("name", "显示名称", data["name"])))
         if not round_mode:
             manage += block("登记或调整成员授权", pages.form("project-grant", "保存授权", {"project_id": data["id"]},
                             input_field("name", "人员或执行端") + input_field("roles", "角色（逗号分隔）", required=False)
                             + input_field("version", "授权版本（新成员填 0）", 0)
                             + json_field("resources", "资源授权数组", [])))
-    new = f'<a class="primary" href="{escape(path, quote=True)}">登记任务</a>' if {"manager", "receiver"} & set(data["roles"]) else ""
+    new = (f'<a class="primary" href="{escape(path, quote=True)}">登记任务</a>'
+           if {"manager", "receiver"} & set(data["roles"]) else "")
     automation = data.get("automation")
     if automation is not None:
         href = "/collaboration?" + urlencode({"project": data["id"]})
@@ -108,12 +112,14 @@ def project_page(actor, data, tasks):
                             {"project_id": data["id"], "version": automation["version"]},
                             selection("enabled", "项目许可", [("no", "仅通知"), ("yes", "可按任务与窗口授权自动执行")], current)))
     return panel(actor, escape(data["name"]), f'<p class="muted">{escape(data["id"])}</p>{new}{manage}'
-                 + (workbench.members_section(data) if round_mode else f'<section class="detail-group"><h2>项目成员</h2><ul>{members}</ul></section>') +
+                 + (workbench.members_section(data) if round_mode
+                    else f'<section class="detail-group"><h2>项目成员</h2><ul>{members}</ul></section>') +
                  f'<section class="detail-group"><h2>项目任务</h2><ul>{links}</ul></section>')
 
 
 def source_fields():
-    return (selection("platform", "平台", [("codex", "Codex"), ("claude", "Claude"), ("gemini", "Gemini"), ("external", "其他")])
+    return (selection("platform", "平台",
+                      [("codex", "Codex"), ("claude", "Claude"), ("gemini", "Gemini"), ("external", "其他")])
             + input_field("window_name", "窗口名称（当前聊天标题）", required=False)
             + input_field("session", "平台会话标识") + input_field("model", "模型")
             + input_field("environment", "环境标识") + input_field("device", "设备")
@@ -124,12 +130,15 @@ def source_fields():
 def executor_index(actor, profile, sources, round_mode=False):
     from .workbench import window_text
     rows = "".join(f'<li><a href="/executors/{quote(item["executor_id"])}">{escape(window_text(item))}</a>'
-                   f' · {escape(item["model"])} · {escape(item["owner"])} · {escape(item["status"])}</li>' for item in sources)
+                   f' · {escape(item["model"])} · {escape(item["owner"])} · {escape(item["status"])}</li>'
+                   for item in sources)
     register = ""
     if (profile["binding"] or {}).get("kind") == "human" and profile["projects"]:
         register = '<a class="primary" href="/invitations">邀请 AI 窗口</a>' if round_mode else block(
-                         "登记新窗口", pages.form("executor-enroll", "登记窗口", contents=selection("project_id", "项目", project_options(profile["projects"]))
-                         + input_field("roles", "角色（executor 或 receiver，可逗号分隔）", "executor") + source_fields()))
+            "登记新窗口", pages.form(
+                "executor-enroll", "登记窗口",
+                contents=selection("project_id", "项目", project_options(profile["projects"]))
+                + input_field("roles", "角色（executor 或 receiver，可逗号分隔）", "executor") + source_fields()))
     return panel(actor, "窗口目录", f'<ul class="roster">{rows}</ul>{register}')
 
 
@@ -143,15 +152,21 @@ def executor_page(actor, item):
 
     def state(value):
         return escape(states.get(value, "待核实（" + str(value or "未回报") + "）"))
-    link = f'<p><a href="{escape(item["url"], quote=True)}" rel="noreferrer noopener">打开对应窗口</a></p>' if item.get("url") else ""
-    tasks = "".join(f'<li><a data-task-link href="/tasks/{quote(c["task_id"])}">{escape(c["task_id"])}</a> · 领取 {state(c["lifecycle"])}'
+    link = (f'<p><a href="{escape(item["url"], quote=True)}" rel="noreferrer noopener">打开对应窗口</a></p>'
+            if item.get("url") else "")
+    tasks = "".join(f'<li><a data-task-link href="/tasks/{quote(c["task_id"])}">{escape(c["task_id"])}</a>'
+                    f' · 领取 {state(c["lifecycle"])}'
                     f' · 执行 {state(c["execution"]["state"])} · 代次 {c["epoch"]}'
                     f' · 回报 {state((c.get("run") or {}).get("state"))}</li>' for c in item["tasks"])
-    summary = f'<p class="muted">{escape(item["executor_id"])} · {escape(item["platform"])} · {escape(item["model"])}</p>'
-    metadata = "".join(f'<dt>{title}</dt><dd>{escape(str(item.get(key) or ("仅本人、责任人或管理员可见" if key in {"session", "device", "directory"} else "未登记")))}</dd>' for key, title in (
-        ("window_name", "窗口名称"), ("window", "窗口编号"), ("owner", "责任人"), ("session", "平台会话"), ("device", "设备"), ("directory", "工作目录"),
-        ("environment", "环境"), ("parent", "父窗口"),
-    ))
+    summary = (f'<p class="muted">{escape(item["executor_id"])} · {escape(item["platform"])} · '
+               f'{escape(item["model"])}</p>')
+    metadata = "".join(
+        f'<dt>{title}</dt><dd>'
+        f'{escape(str(item.get(key) or ("仅本人、责任人或管理员可见" if key in {"session", "device", "directory"} else "未登记")))}'
+        f'</dd>' for key, title in (
+            ("window_name", "窗口名称"), ("window", "窗口编号"), ("owner", "责任人"), ("session", "平台会话"), ("device", "设备"),
+            ("directory", "工作目录"), ("environment", "环境"), ("parent", "父窗口"),
+        ))
     metadata += f'<dt>最后联系</dt><dd>{time_html(item.get("last_contact"))}</dd>'
     update = ""
     manage = bool(item.get("can_manage", actor in {item.get("owner"), "admin"}))
@@ -160,58 +175,77 @@ def executor_page(actor, item):
         if not link:
             link = '<p>按窗口名称查找原聊天；重名时可核对窗口编号、平台会话和工作目录。</p>'
         if item.get("credential_expires"):
-            update += f'<p>令牌到期 {time_html(item["credential_expires"])}{" · 请安排轮换" if item["credential_expiring"] else ""}</p>'
+            update += (f'<p>令牌到期 {time_html(item["credential_expires"])}'
+                       f'{" · 请安排轮换" if item["credential_expiring"] else ""}</p>')
         if manage and item["status"] in {"active", "disabled", "disputed"}:
             path = "/tokens/rotate?" + urlencode({"identity": item["executor_id"]})
             update += f'<p><a href="{escape(path, quote=True)}">轮换令牌</a></p>'
         contact = {"stale": "联系异常，执行状态待核", "current": "近期有心跳", "unconfirmed": "心跳未确认"}
         update += f'<p>{contact.get(item["contact"], "心跳待核实")} · 并发上限 {item["concurrency"]}</p>'
     if item["executor_id"] == actor:
-        update += block("更新窗口名称与会话资料", pages.form("executor-sync", "保存窗口资料", contents=input_field("window_name", "窗口名称（当前聊天标题）", item.get("window_name") or "", required=False)
+        update += block("更新窗口名称与会话资料",
+                        pages.form("executor-sync", "保存窗口资料",
+                                   contents=input_field("window_name", "窗口名称（当前聊天标题）",
+                                                        item.get("window_name") or "", required=False)
                        + input_field("session", "平台会话标识", item["session"])
-                       + input_field("model", "模型", item["model"]) + input_field("environment", "环境", item["environment"])))
-    project_links = (f'<a class="secondary" href="/accounts/projects?{urlencode({"identity": item["executor_id"]})}">调整项目授权</a>'
+                       + input_field("model", "模型", item["model"])
+                       + input_field("environment", "环境", item["environment"])))
+    project_links = (f'<a class="secondary" href="/accounts/projects?{urlencode({"identity": item["executor_id"]})}">'
+                     f'调整项目授权</a>'
                      if item.get("can_manage_projects") else "")
-    controls = f'<a class="secondary" href="{management_url}">查看影响与管理窗口</a>' if manage else '<p class="muted-text">窗口管理由责任人或系统管理员操作。</p>'
+    controls = (f'<a class="secondary" href="{management_url}">查看影响与管理窗口</a>' if manage
+                else '<p class="muted-text">窗口管理由责任人或系统管理员操作。</p>')
     tabs = '<nav class="seg" aria-label="窗口详情">' + "".join(f'<a href="#{key}">{label}</a>' for key, label in (
         ("window-overview", "概览"), ("window-tasks", "任务"), ("window-permissions", "权限与委托"),
         ("window-capabilities", "能力"), ("window-credentials", "凭据"), ("window-admin", "停用与解绑"))) + '</nav>'
     body = (f'<div class="phead"><a href="/executors">← 窗口管理</a><h2>{escape(window_label(item))}</h2>'
             f'<a class="secondary" href="/executors/{quote(item["executor_id"])}/execution">执行配置、动作与资源</a></div>{tabs}'
-            f'<section class="box" id="window-overview"><h3>概览</h3>{summary}<p>窗口编号 [{escape(item["window"])}]</p>{link}<dl>{metadata}</dl></section>'
+            f'<section class="box" id="window-overview"><h3>概览</h3>{summary}<p>窗口编号 [{escape(item["window"])}]</p>'
+            f'{link}<dl>{metadata}</dl></section>'
             f'<section class="box" id="window-tasks"><h3>任务与领取</h3><ul>{tasks or "<li>暂无任务</li>"}</ul></section>'
-            f'<section class="box" id="window-permissions"><h3>权限与委托</h3>{project_links}<a class="secondary" href="/assistants">查看助理与委托</a>{controls}</section>'
-            f'<section class="box" id="window-capabilities"><h3>能力</h3><a class="secondary" href="/capabilities?{urlencode({"identity": item["executor_id"]})}">查看能力声明与核实记录</a></section>'
+            f'<section class="box" id="window-permissions"><h3>权限与委托</h3>{project_links}'
+            f'<a class="secondary" href="/assistants">查看助理与委托</a>{controls}</section>'
+            f'<section class="box" id="window-capabilities"><h3>能力</h3>'
+            f'<a class="secondary" href="/capabilities?{urlencode({"identity": item["executor_id"]})}">'
+            f'查看能力声明与核实记录</a></section>'
             f'<section class="box" id="window-credentials"><h3>凭据与联系</h3>{update or "<p>暂无凭据资料</p>"}</section>'
-            f'<section class="box" id="window-admin"><h3>停用与解绑</h3><p class="muted-text">先核对当前任务、资源占用、项目授权与委托，再提交窗口管理操作。</p>{controls}</section>')
+            f'<section class="box" id="window-admin"><h3>停用与解绑</h3><p class="muted-text">先核对当前任务、资源占用、项目授权与委托，'
+            f'再提交窗口管理操作。</p>{controls}</section>')
     return pages.workspace(actor, f'<section class="wb-page">{body}</section>')
 
 
 def capability_page(actor, profile, data):
-    rows = "".join(f'<li>{escape(row["project_id"])} · {escape(row["id"])} · {escape(row["value"])} · {escape(row["level"])} · 版本 {row["version"]}'
-                   f'<small class="fingerprint">{escape(row["evidence"]["note"])} {escape(row["evidence"]["sha256"])}</small></li>'
-                   for row in data["capabilities"])
+    rows = "".join(
+        f'<li>{escape(row["project_id"])} · {escape(row["id"])} · {escape(row["value"])} · {escape(row["level"])}'
+        f' · 版本 {row["version"]}'
+        f'<small class="fingerprint">{escape(row["evidence"]["note"])} {escape(row["evidence"]["sha256"])}</small></li>'
+        for row in data["capabilities"])
     editor = ""
-    writable = [project for project in profile["projects"] if {"manager", "executor", "receiver"} & set(project["roles"])]
+    writable = [project for project in profile["projects"]
+                if {"manager", "executor", "receiver"} & set(project["roles"])]
     if writable:
         fields = (selection("project_id", "项目", project_options(writable))
                   + input_field("name", "执行身份", data["identity"]) + input_field("capability", "能力标识")
                   + selection("kind", "类别", [("skill", "业务"), ("environment", "环境")])
-                  + input_field("value", "能力值") + input_field("environment", "环境标识", (profile["binding"] or {}).get("environment", "human"))
+                  + input_field("value", "能力值")
+                  + input_field("environment", "环境标识", (profile["binding"] or {}).get("environment", "human"))
                   + selection("level", "证据等级", [("declared", "声明"), ("verified", "已验证")])
-                  + text_field("evidence_note", "证据说明") + input_field("evidence_sha256", "证据 SHA256", required=False, size=64)
+                  + text_field("evidence_note", "证据说明")
+                  + input_field("evidence_sha256", "证据 SHA256", required=False, size=64)
                   + input_field("valid_days", "有效天数", 30) + pages.hidden("issued", int(time.time()))
                   + input_field("version", "记录版本（新记录填 0）", 0))
         editor = block("声明或核对能力", pages.form("capability-save", "保存能力记录", contents=fields))
-    lookup = '<form class="operation" action="/capabilities" method="get">' + input_field("identity", "查询身份", data["identity"]) + (
-        '<button class="secondary" type="submit">查询</button></form>')
+    lookup = ('<form class="operation" action="/capabilities" method="get">'
+              + input_field("identity", "查询身份", data["identity"])
+              + '<button class="secondary" type="submit">查询</button></form>')
     return panel(actor, "能力与证据", f'{lookup}<ul class="roster">{rows}</ul>{editor}')
 
 
 def contract_fields(project, spec=None, resources=None, dependencies=None, round_mode=False, actor=""):
     spec = spec or {"iteration": {"goal": "", "previous": [], "next": []}, "delivery": "",
                     "requirements": [], "review_mode": "source", "user_basis": ""}
-    requirements = "\n".join(" | ".join((r["id"], r["kind"], r["value"], "必需" if r["required"] else "优选", r["evidence"]))
+    requirements = "\n".join(" | ".join((r["id"], r["kind"], r["value"],
+                                         "必需" if r["required"] else "优选", r["evidence"]))
                              for r in spec["requirements"])
     routing = ""
     if round_mode:
@@ -245,8 +279,10 @@ def task_form(actor, project, receivers, round_mode=False):
     fields = (input_field("title", "任务标题") + text_field("brief", "工作范围与冻结输入", size=40000)
               + text_field("criteria", "完成判据（每行一条）", size=3200)
               + selection("kind", "执行类型", [("documentation", "资料")])
-              + selection("receiver", "验收人", choices) + contract_fields(project["id"], round_mode=round_mode, actor=actor))
-    return panel(actor, "登记资料任务", '<p class="muted">填写完整合同后保存为待启动。</p>' + pages.form("register", "登记任务", contents=fields))
+              + selection("receiver", "验收人", choices)
+              + contract_fields(project["id"], round_mode=round_mode, actor=actor))
+    return panel(actor, "登记资料任务",
+                 '<p class="muted">填写完整合同后保存为待启动。</p>' + pages.form("register", "登记任务", contents=fields))
 
 
 def task_contract(view):
@@ -270,14 +306,17 @@ def task_contract(view):
         controls += block("变更任务范围", pages.form("task-scope", "保存范围并待启动", values,
                                                    text_field("reason", "变更依据") + edit))
     if claim and (admin or claim["origin"] == view.get("viewer")):
-        claim_fields = {"task_id": task["task_id"], "version": task["version"], "claim_id": claim["claim_id"], "epoch": claim["epoch"]}
+        claim_fields = {"task_id": task["task_id"], "version": task["version"], "claim_id": claim["claim_id"],
+                        "epoch": claim["epoch"]}
         if claim.get("recovery", {}).get("status") == "pending":
             if admin:
                 controls += block("处置恢复待核", pages.form("task-recover", "记录处置并核对释放", claim_fields,
                               text_field("reason", "处置决定") + text_field("evidence", "实际停止与资源依据")
-                              + text_field("notes", "接续材料", size=16000) + text_field("unresolved", "外部效果待核项", required=False)))
+                              + text_field("notes", "接续材料", size=16000)
+                              + text_field("unresolved", "外部效果待核项", required=False)))
         else:
-            controls += block("登记中断", pages.form("task-interrupt", "进入恢复待核", claim_fields, text_field("reason", "中断事实")))
+            controls += block("登记中断",
+                              pages.form("task-interrupt", "进入恢复待核", claim_fields, text_field("reason", "中断事实")))
     tid = quote(task["task_id"])
     window = (f'<p>当前窗口 <a href="/executors/{quote(view["window_id"])}">{escape(view["window"])}</a></p>'
               if view["window"] and view.get("window_id") else "")
@@ -309,7 +348,8 @@ def audit_search(query, result):
         at = item.get("committed_utc") or item.get("received_utc") or "时间未知"
         event = item.get("operation") or item.get("command") or "请求"
         who = item.get("window") or item.get("actor") or "身份未知"
-        status = {"applied": "已生效", "pending": "待裁定", "rejected": "已拒绝", "evidence-only": "仅留证据"}.get(item["result"], item["result"])
+        status = {"applied": "已生效", "pending": "待裁定", "rejected": "已拒绝",
+                  "evidence-only": "仅留证据"}.get(item["result"], item["result"])
         state = {"事件": item.get("event_id"), "请求": item.get("request_id"), "责任账号": item.get("owner"),
                  "提交服务": item.get("committer"), "原因": item.get("reason"), "变更": item["changes"]}
         rows.append(block(f'{escape(at)} · {escape(who)} · {escape(event)} · {escape(status)}',
@@ -328,12 +368,17 @@ def release_page(actor, data):
     record = escape(json.dumps(release, ensure_ascii=False, indent=2))
     controls = ""
     if "receiver" in data["roles"] and release["status"] in {"pending", "invalid"}:
-        controls += block("独立验收", pages.form("release-accept", "提交验收", contents=text_field("reason", "验收依据") + text_field("report", "验收报告 JSON", size=256000)))
+        controls += block("独立验收", pages.form(
+            "release-accept", "提交验收",
+            contents=text_field("reason", "验收依据") + text_field("report", "验收报告 JSON", size=256000)))
     if "manager" in data["roles"] and release["status"] == "accepted":
-        controls += pages.form("release-close", "关闭本次升级验收", {"acceptance": release["acceptance"]}, text_field("reason", "收口依据"))
+        controls += pages.form("release-close", "关闭本次升级验收", {"acceptance": release["acceptance"]},
+                               text_field("reason", "收口依据"))
     if "manager" in data["roles"] and release["status"] in {"accepted", "closed"}:
         controls += block("更正结论", pages.form("release-correct", "标记结论待复核", contents=text_field("reason", "更正依据")))
-    return panel(actor, "升级验收", f'<p>{escape(fmt["upgrade"])} · 数据合同 {fmt["schema"]}</p><pre class="audit-data">{record}</pre>{controls}')
+    return panel(actor, "升级验收",
+                 f'<p>{escape(fmt["upgrade"])} · 数据合同 {fmt["schema"]}</p>'
+                 f'<pre class="audit-data">{record}</pre>{controls}')
 
 
 def operations_page(actor, data, show_migration=False):

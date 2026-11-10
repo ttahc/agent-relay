@@ -25,9 +25,11 @@ def render(actor, state, name, message="", status=200, draft=None):
     from .workbench import window_tabs
     impact = window_admin.view(state, actor, name)
     draft = draft or {}
-    claims = "".join(f'<tr><td><a href="/tasks/{quote(c["task_id"])}">{escape(c["task_id"])}</a><small>{escape(c["claim_id"])}</small></td>'
-                     f'<td>{escape(c["L"])}</td><td>{escape(c["E"]["state"])}</td><td>{escape(c["W"]["state"])}</td>'
-                     f'<td>{len(c["R"])}</td></tr>' for c in impact["claims"])
+    claims = "".join(
+        f'<tr><td><a href="/tasks/{quote(c["task_id"])}">{escape(c["task_id"])}</a>'
+        f'<small>{escape(c["claim_id"])}</small></td>'
+        f'<td>{escape(c["L"])}</td><td>{escape(c["E"]["state"])}</td><td>{escape(c["W"]["state"])}</td>'
+        f'<td>{len(c["R"])}</td></tr>' for c in impact["claims"])
     grants = "".join(f'<li>{escape(row["project_id"])}：{escape("、".join(row["roles"]))}；资源 {len(row["resources"])}</li>'
                      for row in impact["grants"])
     delegates = "".join(f'<li>{escape(row["project_id"])}：{escape("、".join(row["actions"]))}；v{row["version"]}</li>'
@@ -40,13 +42,16 @@ def render(actor, state, name, message="", status=200, draft=None):
             + ui.selection("owner", "新责任人（仅更换责任人时使用）", [("", "请选择")] + humans, draft.get("owner", ""))
             + ui.text_field("reason", "处置依据", draft.get("reason", "")))
     notice = f'<p role="status">{escape(message)}</p>' if message else ""
-    body = (window_tabs("/executors") + f'<h2>{escape(impact.get("window_name") or impact.get("window") or name)}：处置影响</h2>'
-            f'<p>责任人 {escape(impact["owner"])} · 状态 {escape(impact["status"])} · 当前凭据版本 {impact["version"]}</p>' + notice
+    body = (window_tabs("/executors")
+            + f'<h2>{escape(impact.get("window_name") or impact.get("window") or name)}：处置影响</h2>'
+            f'<p>责任人 {escape(impact["owner"])} · 状态 {escape(impact["status"])} · 当前凭据版本 {impact["version"]}</p>'
+            + notice
             + '<p>暂停、停用、归档会立即使旧令牌失效并撤回全部委托。重新启用须签发并激活新令牌，原委托需重新确认。</p>'
             + '<p>更换责任人保留窗口编号和历史记录，撤回旧委托并清空窗口全部项目授权。新责任人须重新取得项目授权并激活新令牌。'
               '存在活动领取（含待验收）或资源占用时拒绝更换责任人。</p>'
             + f'<p>{escape(impact["consequence"])}</p>'
-            + '<h3>活动领取、待验交付与资源</h3><table><thead><tr><th>任务与领取</th><th>领取</th><th>执行</th><th>交付</th><th>资源占用</th></tr></thead><tbody>'
+            + '<h3>活动领取、待验交付与资源</h3><table><thead><tr><th>任务与领取</th><th>领取</th><th>执行</th><th>交付</th>'
+              '<th>资源占用</th></tr></thead><tbody>'
             + (claims or '<tr><td colspan="5">没有活动领取或资源占用。</td></tr>') + '</tbody></table>'
             + '<h3>窗口独立项目授权</h3><ul>' + (grants or '<li>无独立项目授权。</li>') + '</ul>'
             + '<h3>将撤回的委托</h3><ul>' + (delegates or '<li>无未撤回委托。</li>') + '</ul>'

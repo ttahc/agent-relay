@@ -38,7 +38,8 @@ class DurableSessions:
         with self.lock, self.service.db:
             db = self.service.db
             db.execute("DELETE FROM web_sessions WHERE expires<=? OR digest=?", (now, self.digest(previous)))
-            own = db.execute("SELECT digest FROM web_sessions WHERE actor=? ORDER BY created, rowid", (actor,)).fetchall()
+            own = db.execute("SELECT digest FROM web_sessions WHERE actor=? ORDER BY created, rowid",
+                             (actor,)).fetchall()
             for entry in own[:max(0, len(own) - self.per_actor + 1)]:
                 db.execute("DELETE FROM web_sessions WHERE digest=?", entry)
             db.execute("INSERT INTO web_sessions VALUES(?,?,?,?,?)",

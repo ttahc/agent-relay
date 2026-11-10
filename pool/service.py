@@ -26,9 +26,10 @@ import 协作升级 as rules
 
 
 PUBLIC_ACTIONS = {"register", "claim", "handoff", "deliver", "deliver-files", "stop",
-                  "return", "resume", "review", "close", "cancel", "withdraw"} | upgrade.ACTIONS | round_service.PUBLIC | {
-                    'context-save', 'segment-open', 'action-prepare', 'resource-request', 'resource-cancel', 'action-start',
-                    'execution-fact', 'evidence-stash', 'resource-release'}
+                  "return", "resume", "review", "close", "cancel", "withdraw"
+                  } | upgrade.ACTIONS | round_service.PUBLIC | {
+                    'context-save', 'segment-open', 'action-prepare', 'resource-request', 'resource-cancel',
+                    'action-start', 'execution-fact', 'evidence-stash', 'resource-release'}
 
 
 @contextmanager
@@ -198,7 +199,8 @@ class Service:
                 if row[1] is not None:
                     access = self.receipt_authorization(actor, key)
                     response = json.loads(row[2])
-                    return row[1], self.cleanup_receipt(response) if access == "cleanup" else self.credential_result(key, action, response)
+                    return row[1], (self.cleanup_receipt(response) if access == "cleanup"
+                                    else self.credential_result(key, action, response))
                 if self.db.execute('SELECT 1 FROM request_quarantine WHERE key=?', (key,)).fetchone():
                     self.receipt_authorization(actor, key)
                     return 202, {'status': 'pending', 'request_id': request_id, 'requires_reconciliation': True,
@@ -209,7 +211,8 @@ class Service:
                 row = self.db.execute("SELECT status,response FROM requests WHERE key=?", (key,)).fetchone()
                 access = self.receipt_authorization(actor, key)
                 result = json.loads(row[1]) if row[1] else {"status": "pending", "request_id": request_id}
-                return row[0] or 202, self.cleanup_receipt(result) if access == "cleanup" else self.credential_result(key, action, result)
+                return row[0] or 202, (self.cleanup_receipt(result) if access == "cleanup"
+                                       else self.credential_result(key, action, result))
             if not self.recover():
                 return 503, {"status": "pending", "message": "前序操作待恢复，当前请求尚未登记"}
             authenticate_current()
@@ -229,7 +232,8 @@ class Service:
                     with self.db:
                         self.db.execute("INSERT INTO requests VALUES(?,?,?,?,?,?,?,?)",
                                         (key, fingerprint, actor, action, b"{}", None, status, encoded(response)))
-                        self.record_request(key, actor, action, body, fingerprint, snap["state"], reported_utc=reported_utc)
+                        self.record_request(key, actor, action, body, fingerprint, snap["state"],
+                                            reported_utc=reported_utc)
                     return status, response
                 with self.db:
                     self.db.execute("INSERT INTO requests VALUES(?,?,?,?,?,?,?,?)",
@@ -275,7 +279,8 @@ class Service:
             selected = default_context(state, actor)
             selected = execution.audit_context(state, actor, body) or selected
             details.update(source_platform=subject.get('platform'), execution_context=selected,
-                           model=selected.get('config', {}).get('model'), platform=selected.get('config', {}).get('platform'))
+                           model=selected.get('config', {}).get('model'),
+                           platform=selected.get('config', {}).get('platform'))
             if action in {'execution-fact', 'evidence-stash'} and not body.get('action_id'):
                 details['reporter_context'] = details.pop('execution_context')
                 details['original_execution_context'] = 'unknown'
@@ -286,7 +291,8 @@ class Service:
             name = response["issued_to"]
             token = self.accounts.token("account", key, name)
             if not self.round_enabled() or (self.accounts.identity(token) == name and self.credential_version(name) and
-                    (self.accounts.expires(name) or 0) - round_service.TOKEN_SECONDS + round_service.ACTIVATION_SECONDS > time.time()):
+                    (self.accounts.expires(name) or 0) - round_service.TOKEN_SECONDS
+                    + round_service.ACTIVATION_SECONDS > time.time()):
                 return {**response, "token": token}
         return round_service.result(self, action, response)
 
@@ -311,13 +317,15 @@ class Service:
     @staticmethod
     def cleanup_receipt(response):
         result = {key: response[key] for key in ("status", "request_id", "head") if key in response}
-        result["steps"] = [{key: row[key] for key in ("event_id", "result") if key in row} for row in response.get("steps", [])]
+        result["steps"] = [{key: row[key] for key in ("event_id", "result") if key in row}
+                           for row in response.get("steps", [])]
         result["cleanup_only"] = True
         return result
 
     def recover(self):
         with self.lock:
-            pending = self.db.execute("SELECT key FROM requests WHERE status IS NULL AND key NOT IN (SELECT key FROM request_quarantine) ORDER BY rowid").fetchall()
+            pending = self.db.execute("SELECT key FROM requests WHERE status IS NULL "
+                                      "AND key NOT IN (SELECT key FROM request_quarantine) ORDER BY rowid").fetchall()
             return all(self.execute(key)[0] != 202 for (key,) in pending)
 
     def execute(self, key):
@@ -397,9 +405,11 @@ class Service:
         return snap, {key: terminal[key] for key in ("result", "reason", "ledger_seq", "sha256")}
 
     def ledger_decide(self, state, env, context):
-        pending = self.db.execute('SELECT s.envelope FROM steps s JOIN request_quarantine q ON q.key=s.request_key').fetchall()
+        pending = self.db.execute('SELECT s.envelope FROM steps s '
+                                  'JOIN request_quarantine q ON q.key=s.request_key').fetchall()
         if any((prior := json.loads(row[0])).get('event_id') == env.get('event_id') and
-               prior.get('origin_id') == env.get('origin_id') and digest(encoded(prior)) == digest(encoded(env)) for row in pending):
+               prior.get('origin_id') == env.get('origin_id') and digest(encoded(prior)) == digest(encoded(env))
+               for row in pending):
             raise Rejected('原请求已隔离，须经关联新请求按当前授权接续；旧信封不重放', 'intent-final')
         context['phase'] = self.lifecycle.status()['phase']
         context.update(self.desk.evidence_context(env, state))
@@ -411,7 +421,8 @@ class Service:
                     "request_id": body["request_id"], "head": snap["head"], "steps": receipts}
         state = snap["state"]
         record = self.db.execute("SELECT actor FROM requests WHERE key=?", (key,)).fetchone()
-        visible = not (task_id and round_service.enabled(state)) or self.visible(state, state["tasks"][task_id], record[0])
+        visible = (not (task_id and round_service.enabled(state))
+                   or self.visible(state, state["tasks"][task_id], record[0]))
         if task_id and visible:
             response["task"] = snap["state"]["tasks"][task_id]
         if claim_id and visible:
@@ -432,14 +443,16 @@ class Service:
                 subject = rules.identity(state, name) or {}
                 if registration := enrollment.get("round_registration"):
                     record = state["round"]["enrollment:" + registration]
-                    self.accounts.issue_executor(name, round_service.token_for(self, record), record["expires"], subject["credential"])
+                    self.accounts.issue_executor(name, round_service.token_for(self, record), record["expires"],
+                                                 subject["credential"])
                 else:
                     self.accounts.enroll(key, enrollment)
                     if enrollment.get("password_signup"):
                         self.passwords.apply(key, "signup", name)
                     if round_service.enabled(state) and subject.get("kind") == "executor":
                         self.accounts.issue_executor(name, self.accounts.token("account", key, name),
-                                                     int(subject["last_contact"]) + round_service.TOKEN_SECONDS, subject["credential"])
+                                                     int(subject["last_contact"]) + round_service.TOKEN_SECONDS,
+                                                     subject["credential"])
                     elif subject.get("kind") == "executor":
                         self.accounts.bind_executor(name, subject["credential"])
                 response["account"] = name
@@ -473,7 +486,8 @@ class Service:
                 return None
             state = self.snapshot()["state"]
             subject = rules.identity(state, actor) or {}
-            if subject.get("kind") == "executor" and not self.accounts.executor_current(actor, subject.get("credential"), token):
+            if (subject.get("kind") == "executor"
+                and not self.accounts.executor_current(actor, subject.get("credential"), token)):
                 return None
             return actor
 

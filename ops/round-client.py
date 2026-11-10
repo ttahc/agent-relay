@@ -29,7 +29,8 @@ DOWNLOAD_LIMITS = {"json_bytes": MAX_TRANSFER, "zip_bytes": 144 * 1024 * 1024,
                    "total_bytes": 128 * 1024 * 1024, "file_bytes": 64 * 1024 * 1024,
                    "files": 500, "manifest_bytes": 1024 * 1024}
 SECRET_FIELDS = {"token", "tokens", "rotation_token", "access_token", "refresh_token", "api_key", "private_key",
-                 "code", "recovery", "recovery_code", "reset_code", "password", "passwd", "secret", "proof_sha", "invitation_url", "invite_url"}
+                 "code", "recovery", "recovery_code", "reset_code", "password", "passwd", "secret", "proof_sha",
+                 "invitation_url", "invite_url"}
 
 
 def private_bytes(raw, decrypt=False):
@@ -183,17 +184,20 @@ class Pool:
         self.context = ssl.create_default_context(cadata=ssl.DER_cert_to_PEM_cert(der))
         self.context.minimum_version = ssl.TLSVersion.TLSv1_2
 
-    def call(self, route, token=None, body=None, response_format="json", response_limit=None, method=None, timeout=None):
+    def call(self, route, token=None, body=None, response_format="json", response_limit=None,
+             method=None, timeout=None):
         # Build once so retries of any POST retain the same request identity and bytes.
         if body is not None:
             body = {"request_id": "c-" + secrets.token_hex(16), **body}
         if timeout is not None:
-            return bounded_retry(lambda: self._call_once(route, token, body, response_format, response_limit, method, timeout))
+            return bounded_retry(lambda: self._call_once(route, token, body, response_format, response_limit,
+                                                         method, timeout))
         if response_limit is None and method is None:
             return bounded_retry(lambda: self._call_once(route, token, body, response_format))
         return bounded_retry(lambda: self._call_once(route, token, body, response_format, response_limit, method))
 
-    def _call_once(self, route, token=None, body=None, response_format="json", response_limit=None, method=None, timeout=12):
+    def _call_once(self, route, token=None, body=None, response_format="json", response_limit=None,
+                   method=None, timeout=12):
         if response_format not in {"json", "text", "bytes", "file", "headers"}:
             raise ValueError("响应格式无效")
         control_limit = min(MAX_TRANSFER, getattr(self, "_taskpool_control_limit", MAX_TRANSFER))
@@ -302,8 +306,9 @@ def server_features(api, token):
         if not unsupported_interface(error):
             raise
         value = {"api_protocol": 0, "security_schema": 3, "features": {}, "legacy_confirmed": True}
-    if (not isinstance(value, dict) or type(value.get("api_protocol")) is not int or value["api_protocol"] not in {0, 1} or
-            type(value.get("security_schema")) is not int or not isinstance(value.get("features"), (dict, list))):
+    if (not isinstance(value, dict)
+            or type(value.get("api_protocol")) is not int or value["api_protocol"] not in {0, 1}
+            or type(value.get("security_schema")) is not int or not isinstance(value.get("features"), (dict, list))):
         raise ValueError("服务功能说明无效，未降级或发送新执行操作")
     remote = value.get("input_download", {})
     if not isinstance(remote, dict):
@@ -400,7 +405,8 @@ def load_invitation(args):
         response_route = value.get("connect_host", source["actual_host"] if source["scheme"] == "http" else None)
         if (not isinstance(pin, str) or pin.lower() != source["pin"] or address.scheme != source["scheme"]
                 or address.hostname != source["tls"] or address.port != source["port"]
-                or address.username or address.password or address.path not in {"", "/"} or address.query or address.fragment
+                or address.username or address.password or address.path not in {"", "/"}
+                or address.query or address.fragment
                 or response_route not in {source["actual_host"], source["tls"]}
                 or not isinstance(value.get("code"), str) or not re.fullmatch(r"[A-Za-z0-9_-]{43}", value["code"])):
             raise ValueError("binding mismatch")
@@ -421,8 +427,10 @@ def safe_error(value):
     text = re.sub(r"\b(?:ghp_|github_pat_|sk-proj-|sk-ant-)[A-Za-z0-9_-]{24,}", "[已隐藏]", text)
     text = re.sub(r"(?i)(/ai/join/[A-Za-z0-9_-]+)#[^\s\"'<>]+", r"\1#[已隐藏]", text)
     text = re.sub(r"(?i)\bBearer\s+[A-Za-z0-9._~+/-]+=*", "Bearer [已隐藏]", text)
-    return re.sub(r"(?i)((?:token|rotation_token|access_token|refresh_token|api[_-]?key|code|password|passwd|secret|密码|令牌)\s*[=:：]\s*)[\"']?[^\s,;\"'<>]+",
-                  r"\1[已隐藏]", text)
+    return re.sub(
+        r"(?i)((?:token|rotation_token|access_token|refresh_token|api[_-]?key|code|password|passwd|secret|密码|令牌)"
+        r"\s*[=:：]\s*)[\"']?[^\s,;\"'<>]+",
+        r"\1[已隐藏]", text)
 
 
 def public_value(value):
@@ -512,7 +520,8 @@ def onboarding_summary(api, token):
 
 
 def source(args):
-    variable = {"codex": "CODEX_THREAD_ID", "claude": "CLAUDE_SESSION_ID", "gemini": "GEMINI_SESSION_ID"}.get(args.platform)
+    variable = {"codex": "CODEX_THREAD_ID", "claude": "CLAUDE_SESSION_ID",
+                "gemini": "GEMINI_SESSION_ID"}.get(args.platform)
     session = args.session or (os.environ.get(variable) if variable else "")
     profile = {"platform": args.platform, "session": session or ("local-" + secrets.token_hex(16)),
             "session_source": "reported" if session else "local", "model": args.model or "unknown",
@@ -524,7 +533,8 @@ def source(args):
 
 
 def endpoint(state, args):
-    return Pool(state.data["url"], state.data.get("certificate_sha256"), args.allow_loopback, state.data.get("connect_host"))
+    return Pool(state.data["url"], state.data.get("certificate_sha256"), args.allow_loopback,
+                state.data.get("connect_host"))
 
 
 def whoami(state, api):
@@ -563,7 +573,8 @@ def rename(state, api, name):
         body["window_name"] = name
         local_update["source"] = {**state.data.get("source", {}), **body}
         return body
-    result = durable_write(state, api, operation_key("rename", {"window_name": name}), "executor-sync", prepare, local_update)
+    result = durable_write(state, api, operation_key("rename", {"window_name": name}), "executor-sync",
+                           prepare, local_update)
     return {"status": result.get("status", "applied"),
             "request_id": result.get("request_id") or state.data["last_write"]["request_id"],
             **active_identity_fields(state, api)}
@@ -590,7 +601,8 @@ def finish_activation(state, api):
     token = data.get("rotation_token", data.get("token"))
     data.setdefault("activation_request", "activate-" + secrets.token_hex(16))
     state.save()
-    result = api.call("ai-activate", token, {"request_id": data["activation_request"], "registration_id": data["registration_id"]})
+    result = api.call("ai-activate", token,
+                      {"request_id": data["activation_request"], "registration_id": data["registration_id"]})
     data["token"] = token
     data.update({k: result[k] for k in ("executor_id", "window", "expires")})
     for key in ("request", "registration_id", "rotation_token", "activation_request"):
@@ -612,7 +624,8 @@ def enroll(state, args):
             raise ValueError("请提供 --invite 文件路径（或 -）或 --invite-url 完整邀请链接")
         value = load_invitation(args)
         profile = source(args)
-        data.update(url=value["url"], certificate_sha256=value.get("certificate_sha256"), connect_host=value.get("connect_host"), source=profile,
+        data.update(url=value["url"], certificate_sha256=value.get("certificate_sha256"),
+                    connect_host=value.get("connect_host"), source=profile,
                     request={"request_id": "enroll-" + secrets.token_hex(16), "invite_id": value["id"],
                              "code": value["code"], "recovery": secrets.token_urlsafe(32), "source": profile})
         state.save()
@@ -646,10 +659,12 @@ def sync(state, args):
         if args.window_name is not None:
             body["window_name"] = args.window_name
         return body
-    durable_write(state, api, operation_key("sync", {key: getattr(args, key) for key in ("window_name", "model", "environment")}),
+    durable_write(state, api,
+                  operation_key("sync", {key: getattr(args, key) for key in ("window_name", "model", "environment")}),
                   "executor-sync", prepare)
     current = api.call("identity", state.data["token"])["binding"]
-    state.data.setdefault("source", {}).update({key: current[key] for key in ("session", "model", "environment", "window_name") if key in current})
+    state.data.setdefault("source", {}).update(
+        {key: current[key] for key in ("session", "model", "environment", "window_name") if key in current})
     state.save()
     return {"status": "active", "window": current["window"], "window_name": current.get("window_name"),
             "executor_id": state.data["executor_id"]}
@@ -683,7 +698,8 @@ def declared_capability(state, api, args):
                 "kind": "skill", "value": args.value, "level": "declared", "environment": environment,
                 "evidence": {"note": args.evidence, "sha256": args.evidence_sha256 or ""},
                 "expires": int(time.time()) + args.days * 86400, "version": old.get("version", 0)}
-    parameters = {key: getattr(args, key) for key in ("project", "capability", "value", "environment", "evidence", "evidence_sha256", "days")}
+    parameters = {key: getattr(args, key)
+                  for key in ("project", "capability", "value", "environment", "evidence", "evidence_sha256", "days")}
     return durable_write(state, api, operation_key("declare", parameters), "capability-save", prepare)
 
 
@@ -692,7 +708,8 @@ def visible_tasks(state, api, args):
     wire_full = full and supported(server_features(api, state.data["token"]), "list-summary")
     data = task_options(api, state.data["token"], args.project, full=wire_full)
     if args.claimable:
-        data = {**data, "tasks": [row for row in data.get("tasks", []) if (row.get("qualification") or {}).get("eligible")]}
+        data = {**data,
+                "tasks": [row for row in data.get("tasks", []) if (row.get("qualification") or {}).get("eligible")]}
     counts = data.get("counts") or {}
     data["message"] = f'可见 {counts.get("visible", len(data.get("tasks", [])))} 项，可领取 {counts.get("claimable", 0)} 项'
     if not counts.get("claimable") and counts.get("visible"):
@@ -785,7 +802,8 @@ def claim_task(state, api, args):
 def create_task(state, api, args):
     def prepare():
         path = args.contract.expanduser().absolute()
-        if is_link(path) or not path.is_file() or path.resolve() == state.path.resolve() or path.stat().st_size > 1024 * 1024:
+        if (is_link(path) or not path.is_file() or path.resolve() == state.path.resolve()
+            or path.stat().st_size > 1024 * 1024):
             raise ValueError("任务合同须为不超过 1 MiB 的普通 JSON 文件")
         body = json.loads(path.read_text(encoding="utf-8-sig"))
         if not isinstance(body, dict) or "request_id" in body:
@@ -800,7 +818,8 @@ def task_publication(state, api, args):
         task = api.call("tasks/" + quote(args.task, safe=""), state.data["token"])["task"]
         return {**{key: task[key] for key in ("task_id", "version", "scope_version")}, "reason": args.reason}
     route = "task-publish" if args.action == "publish" else "task-hold"
-    return durable_write(state, api, operation_key(args.action, {"task": args.task, "reason": args.reason}), route, prepare)
+    return durable_write(state, api, operation_key(args.action, {"task": args.task, "reason": args.reason}),
+                         route, prepare)
 
 
 def update_feedback(state, api, args):
@@ -825,7 +844,8 @@ def update_feedback(state, api, args):
                 "linked_task": args.linked_task if args.linked_task is not None else current.get("linked_task") or "",
                 "duplicate": chosen("duplicate"), "reason": args.reason, "evidence": chosen("evidence"),
                 "metrics": metrics, "lesson": chosen("lesson"), "limits": chosen("limits")}
-    parameters = {key: getattr(args, key) for key in ("project", "feedback_id", "status", "reason", "linked_task", "duplicate",
+    parameters = {key: getattr(args, key)
+                  for key in ("project", "feedback_id", "status", "reason", "linked_task", "duplicate",
                                                      "evidence", "metrics", "lesson", "limits")}
     return durable_write(state, api, operation_key("feedback-update", parameters), "feedback-update", prepare)
 
@@ -921,7 +941,8 @@ def frozen_inputs(state, view, args):
         claim = own[0] if own else None
     binding = {"task_id": task["task_id"], "scope_version": claim["W"]["scope"] if claim else task["scope_version"],
                "claim_id": claim["claim_id"] if claim else None}
-    refs = [{"path": path, "sha256": sha.lower()} for path, sha in (claim["inputs"] if claim else task["inputs"]).items()]
+    refs = [{"path": path, "sha256": sha.lower()}
+            for path, sha in (claim["inputs"] if claim else task["inputs"]).items()]
     seen = set()
     for ref in refs:
         relative_artifact(ref["path"])
@@ -996,7 +1017,9 @@ def validate_input_zip(stream, binding, refs, limits):
             raise ValueError("输入包清单超过预算")
         checksum = hashlib.sha256(raw).hexdigest()
         header_sha = getattr(stream, "manifest_sha256", None)
-        if header_sha is not None and (not isinstance(header_sha, str) or not re.fullmatch(r"[A-Fa-f0-9]{64}", header_sha) or header_sha.lower() != checksum):
+        if (header_sha is not None
+            and (not isinstance(header_sha, str) or not re.fullmatch(r"[A-Fa-f0-9]{64}", header_sha)
+                 or header_sha.lower() != checksum)):
             raise ValueError("输入包清单与响应摘要不一致，未降级下载")
 
         def unique_object(pairs):
@@ -1054,7 +1077,8 @@ def download_inputs(state, api, args, view):
     if use_package:
         query = {key: value for key, value in binding.items() if value is not None}
         try:
-            stream = api.call("input-package?" + urlencode(query), token, response_format="file", response_limit=limits["zip_bytes"])
+            stream = api.call("input-package?" + urlencode(query), token, response_format="file",
+                              response_limit=limits["zip_bytes"])
         except RequestError as error:
             if not (error.status == 404 and error.value.get("code") == "unsupported_interface" or error.status == 413):
                 raise
@@ -1079,10 +1103,12 @@ def download_inputs(state, api, args, view):
                                 raw = member.read(row["bytes"] + 1)
                             if len(raw) != row["bytes"] or hashlib.sha256(raw).hexdigest() != row["sha256"]:
                                 raise ValueError("输入文件长度或 SHA256 不符；保留已核验文件，未降级")
-                            record = {**ref, "bytes": len(raw), "saved_to": save_artifact(args.output, ref, raw), "reused": False}
+                            record = {**ref, "bytes": len(raw), "saved_to": save_artifact(args.output, ref, raw),
+                                      "reused": False}
                         output.append(record)
                         save_input_progress(args.output, binding, checksum, output)
-            return {**binding, "mode": "input-package", "manifest_sha256": checksum, "verified_files": len(output), "files": output}
+            return {**binding, "mode": "input-package", "manifest_sha256": checksum, "verified_files": len(output),
+                    "files": output}
     checksum = hashlib.sha256(json.dumps({**binding, "inputs": refs}, sort_keys=True).encode()).hexdigest()
     save_input_progress(args.output, binding, checksum, output)
     total = 0
@@ -1098,7 +1124,8 @@ def download_inputs(state, api, args, view):
             raise DownloadBudgetError("total_bytes", "逐项下载总量超过预算；已核验结果保留")
         output.append(record)
         save_input_progress(args.output, binding, checksum, output)
-    return {**binding, "mode": "individual", "manifest_sha256": checksum, "verified_files": len(output), "files": output}
+    return {**binding, "mode": "individual", "manifest_sha256": checksum, "verified_files": len(output),
+            "files": output}
 
 
 def download_task(state, api, args):
@@ -1191,7 +1218,8 @@ def deliver_task(state, api, args):
         if args.stop_evidence:
             body["stop_evidence"] = args.stop_evidence
         return body
-    parameters = {"task": args.task, "claim_id": args.claim_id, "files": [str(path.expanduser().absolute()) for path in args.file],
+    parameters = {"task": args.task, "claim_id": args.claim_id,
+                  "files": [str(path.expanduser().absolute()) for path in args.file],
                   "stop_evidence": args.stop_evidence}
     return durable_write(state, api, operation_key("deliver", parameters), "deliver-files", prepare)
 
@@ -1296,10 +1324,12 @@ def execution_command(state, api, args):
             view = execution_view(state, api)
             previous = execution_row(view, "contexts", args.context_id) if args.context_id else None
             defaults = (view.get("default_context") or {})
-            base = previous or (execution_row(view, "contexts", defaults["context_id"], defaults.get("version")) if defaults.get("context_id") else {})
+            base = (previous or (execution_row(view, "contexts", defaults["context_id"], defaults.get("version"))
+                                 if defaults.get("context_id") else {}))
             config = dict(base.get("config", {}))
             sources = dict(config.get("sources", {}))
-            for field in ("platform", "adapter", "model", "reasoning", "tools_version", "permissions_version", "environment"):
+            for field in ("platform", "adapter", "model", "reasoning", "tools_version",
+                          "permissions_version", "environment"):
                 supplied = getattr(args, field, None)
                 if supplied is not None:
                     config[field] = supplied
@@ -1307,8 +1337,12 @@ def execution_command(state, api, args):
                 elif field not in config:
                     config[field], sources[field] = "unknown", "unknown"
             config["sources"] = sources
-            config["sources"] = {field: "unknown" if config.get(field) is None or config.get(field) == "" or config.get(field) == "unknown" else "reported"
-                                 for field in ("platform", "adapter", "model", "reasoning", "tools_version", "permissions_version", "environment")}
+            config["sources"] = {
+                field: ("unknown"
+                        if config.get(field) is None or config.get(field) == "" or config.get(field) == "unknown"
+                        else "reported")
+                for field in ("platform", "adapter", "model", "reasoning", "tools_version",
+                              "permissions_version", "environment")}
             body = {"context_id": args.context_id, "version": previous["version"] if previous else 0,
                     "config": config, "make_default": args.make_default}
         elif route == "segment-open":
@@ -1382,11 +1416,13 @@ def execution_command(state, api, args):
 
 
 def feedback(state, api, args):
-    parameters = {key: getattr(args, key) for key in ("project", "task", "kind", "title", "details", "impact", "evidence", "visibility")}
+    parameters = {key: getattr(args, key)
+                  for key in ("project", "task", "kind", "title", "details", "impact", "evidence", "visibility")}
 
     def prepare():
         return {"project_id": args.project, "task_id": args.task or "", "kind": args.kind, "title": args.title,
-                "details": args.details, "impact": args.impact, "evidence": args.evidence or "", "visibility": args.visibility,
+                "details": args.details, "impact": args.impact, "evidence": args.evidence or "",
+                "visibility": args.visibility,
                 "observed": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
     return durable_write(state, api, operation_key("feedback", parameters), "feedback-save", prepare)
 
@@ -1424,9 +1460,11 @@ def wait_once(api, token, cursor, hold):
     value = api.call("wait?" + urlencode({"cursor": cursor, "timeout": hold} if cursor else {"timeout": hold}),
                      token, timeout=hold + 15)
     events = value.get("events") if isinstance(value, dict) else None
-    if (not isinstance(events, list) or not isinstance(value.get("cursor"), str) or not re.fullmatch(r"[0-9a-f]{64}", value["cursor"]) or
-            any(not isinstance(event, dict) or not isinstance(event.get("key"), str) or not isinstance(event.get("type"), str)
-                for event in events)):
+    if (not isinstance(events, list) or not isinstance(value.get("cursor"), str)
+            or not re.fullmatch(r"[0-9a-f]{64}", value["cursor"])
+            or any(not isinstance(event, dict) or not isinstance(event.get("key"), str)
+                   or not isinstance(event.get("type"), str)
+                   for event in events)):
         raise ValueError("服务返回的等待结果无效")
     return value["cursor"], events
 
@@ -1450,7 +1488,8 @@ def wait_for_events(state, args):
     cursor, pause, events = "", 2, []
     while True:
         remaining = args.timeout - (time.monotonic() - started)
-        hold = min(hold_limit, int(remaining) + (remaining > int(remaining))) if remaining > 0 else 0  # whole seconds, rounded up
+        # whole seconds, rounded up
+        hold = min(hold_limit, int(remaining) + (remaining > int(remaining))) if remaining > 0 else 0
         try:
             cursor, events = wait_once(api, token, cursor, hold)
             pause = 2
@@ -1585,13 +1624,15 @@ def run_once(state, api):
     report(api, token, claim, "intent", "本机客户端已持久记录启动意图", "intent-" + event_id)
     payload = json.dumps({"task_id": event["task_id"], "claim": claim, "notice": event_id},
                          ensure_ascii=False).encode("utf-8")
-    output_path = state.path.parent / (state.path.name + ".run-" + hashlib.sha256(event_id.encode()).hexdigest()[:16] + ".output")
+    output_path = state.path.parent / (state.path.name + ".run-"
+                                       + hashlib.sha256(event_id.encode()).hexdigest()[:16] + ".output")
     attempt.update(phase="starting", output=str(output_path))
     state.save()
     fd = os.open(output_path, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
     with os.fdopen(fd, "w+b") as output:
         # Do not use Popen's context manager: a client exception must not wait on or kill an external task.
-        child = subprocess.Popen(cmd, cwd=data["workdir"], stdin=subprocess.PIPE, stdout=output, stderr=subprocess.DEVNULL)
+        child = subprocess.Popen(cmd, cwd=data["workdir"], stdin=subprocess.PIPE, stdout=output,
+                                 stderr=subprocess.DEVNULL)
         attempt.update(phase="running", pid=child.pid, started_at=time.time())
         state.save()
         queue_report(state, claim, "started", f"本机执行入口已启动，进程 {child.pid}", "start-" + event_id)
@@ -1698,8 +1739,8 @@ def build_parser():
     selection.add_argument("--inputs", action="store_true", help="仅下载所选冻结输入，优先安全输入包并保留逐项续行")
     download.add_argument("--claim-id", help="--inputs 选择原领取；省略时优先当前窗口唯一活动领取")
     for flag, destination in (("zip", "zip_bytes"), ("total", "total_bytes"), ("file", "file_bytes")):
-        download.add_argument("--max-input-" + flag + "-mib", type=lambda value: int(value) * 1024 * 1024, dest=destination,
-                              help="本机下载预算 MiB；仍取与服务公布预算的较小值")
+        download.add_argument("--max-input-" + flag + "-mib", type=lambda value: int(value) * 1024 * 1024,
+                              dest=destination, help="本机下载预算 MiB；仍取与服务公布预算的较小值")
     download.add_argument("--max-input-files", type=int, dest="files")
     download.add_argument("--sha256", help="指定文件的预期 SHA256；默认采用任务记录")
     deliver = commands.add_parser("deliver", help="提交产物，服务端生成与当前领取匹配的交付清单")
@@ -1726,7 +1767,9 @@ def build_parser():
     feedback_update = commands.add_parser("feedback-update", help="按现有记录及业务规则处理反馈")
     feedback_update.add_argument("feedback_id")
     feedback_update.add_argument("--project", required=True)
-    feedback_update.add_argument("--status", required=True, choices=("triage", "evidence", "accepted", "working", "review", "verified", "deferred", "duplicate", "declined"))
+    feedback_update.add_argument("--status", required=True,
+                                 choices=("triage", "evidence", "accepted", "working", "review", "verified", "deferred",
+                                          "duplicate", "declined"))
     feedback_update.add_argument("--reason", required=True)
     feedback_update.add_argument("--linked-task")
     feedback_update.add_argument("--duplicate")
@@ -1782,7 +1825,8 @@ def build_parser():
     release_resource.add_argument("--grant-id")
     release_resource.add_argument("--note", required=True)
     release_resource.add_argument("--evidence-sha256")
-    release_resource.add_argument("--basis", choices=("adapter-confirmed", "human-isolation", "unconfirmed"), default="unconfirmed")
+    release_resource.add_argument("--basis", choices=("adapter-confirmed", "human-isolation", "unconfirmed"),
+                                  default="unconfirmed")
     for name in ("fact", "stash"):
         command = commands.add_parser(name, help="绑定原执行来源保存事实或产物，不取得新执行权限")
         command.add_argument("task")
@@ -1793,7 +1837,9 @@ def build_parser():
         command.add_argument("--note", required=True)
         command.add_argument("--reporter-kind", choices=("owner", "human", "adapter"), default="owner")
         if name == "fact":
-            command.add_argument("--kind", choices=("started", "finished", "error", "stopped", "not-started", "unconfirmed"), required=True)
+            command.add_argument("--kind",
+                                 choices=("started", "finished", "error", "stopped", "not-started", "unconfirmed"),
+                                 required=True)
             command.add_argument("--permit-id")
             command.add_argument("--evidence-sha256")
             command.add_argument("--blocker-id", action="append", help="显式关联 execution 显示的旧物理未知记录，不自动推断已停止")
@@ -1850,7 +1896,8 @@ def configure_runner(state, api, args):
     if command and (not Path(command[0]).is_absolute() or not Path(command[0]).is_file() or
                     Path(command[0]).suffix.lower() in (".bat", ".cmd") or not args.workdir.is_dir()):
         raise ValueError("本机入口须为绝对路径的可执行文件及已存在的工作目录")
-    parameters = {"command": command, "workdir": str(args.workdir.resolve()), "limit": args.limit, "heartbeat": args.heartbeat}
+    parameters = {"command": command, "workdir": str(args.workdir.resolve()), "limit": args.limit,
+                  "heartbeat": args.heartbeat}
 
     def prepare_configuration():
         settings = api.call("runner", token)["settings"]
@@ -1929,7 +1976,8 @@ def main():
             return 0
         with state.exclusive():
             value = run_command(state, args)
-            print(value if isinstance(value, str) else json.dumps(public_value(value), ensure_ascii=False, indent=2), flush=True)
+            print(value if isinstance(value, str) else json.dumps(public_value(value), ensure_ascii=False, indent=2),
+                  flush=True)
         return 0
     except (OSError, HTTPException, ValueError, RuntimeError, KeyError) as error:
         print(safe_error(error), file=sys.stderr)

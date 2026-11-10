@@ -284,7 +284,8 @@ def serve(args, service, config, store):
         for kind in signals:
             signal.signal(kind, on_signal)
         try:
-            control_context = Control(store, service.lifecycle, server.shutdown, service.consistent_backup) if os.name == "posix" else nullcontext()
+            control_context = (Control(store, service.lifecycle, server.shutdown, service.consistent_backup)
+                               if os.name == "posix" else nullcontext())
             with control_context:
                 emit({"url": f"{scheme}://{host}:{server.server_address[1]}", "store": str(store)})
                 server.serve_forever()

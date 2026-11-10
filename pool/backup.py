@@ -124,7 +124,8 @@ def snapshot(store, archive, tag, seed=False, *, service=None):
     if archive.resolve().is_relative_to(store) or store.is_relative_to(archive.resolve()):
         raise ValueError("备份目录必须独立于服务数据目录")
     tls_root = store.parent / "tls"
-    if store.name == "local" and (archive.resolve().is_relative_to(tls_root) or tls_root.is_relative_to(archive.resolve())):
+    if (store.name == "local"
+        and (archive.resolve().is_relative_to(tls_root) or tls_root.is_relative_to(archive.resolve()))):
         raise ValueError("备份目录必须独立于 TLS 材料目录")
     archive.mkdir(parents=True, exist_ok=True, mode=0o700)
     if os.name == "posix" and archive.stat().st_mode & 0o077:
@@ -169,8 +170,9 @@ def snapshot(store, archive, tag, seed=False, *, service=None):
                 with tempfile.TemporaryDirectory(prefix=".sqlite-", dir=archive) as temporary:
                     target = Path(temporary) / "consistent.sqlite3"
                     with ExitStack() as databases:
-                        source = service.db if service is not None and path.name == "http-journal.sqlite3" else databases.enter_context(
-                            closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)))
+                        source = (service.db if service is not None and path.name == "http-journal.sqlite3"
+                                  else databases.enter_context(
+                                      closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True))))
                         backup = databases.enter_context(closing(sqlite3.connect(target)))
                         source.backup(backup)
                         if backup.execute("PRAGMA integrity_check").fetchone() != ("ok",):

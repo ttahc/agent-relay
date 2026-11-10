@@ -32,7 +32,8 @@ FIELDS = {
 }
 PREFIXES = {"context-save": "ctx-", "segment-open": "seg-", "action-prepare": "act-", "resource-request": "rq-",
             "execution-fact": "fact-", "evidence-stash": "stash-"}
-IDENTIFIERS = ("task_id", "claim_id", "context_id", "segment_id", "action_id", "resource_request_id", "grant_id", "permit_id")
+IDENTIFIERS = ("task_id", "claim_id", "context_id", "segment_id", "action_id", "resource_request_id",
+               "grant_id", "permit_id")
 
 
 def _row(state, table, key):
@@ -122,7 +123,8 @@ def plan(service, actor, action, key, body, state):
         extra += " blocker_ids"
     fields(body, "request_id " + FIELDS[action] + extra)
     if any(body.get(name) and not isinstance(body[name], str) for name in IDENTIFIERS) or not (
-            isinstance(body.get("blocker_ids", []), list) and all(isinstance(key, str) for key in body.get("blocker_ids", []))):
+            isinstance(body.get("blocker_ids", []), list)
+            and all(isinstance(key, str) for key in body.get("blocker_ids", []))):
         raise ClientError("编号字段须为文本")
     p = {name: deepcopy(value) for name, value in body.items() if name != "request_id"}
     p["op"] = action
@@ -162,7 +164,8 @@ def plan(service, actor, action, key, body, state):
     audit = {"actor": actor, "credential_version": (rules.identity(state, actor) or {}).get("credential")}
     candidate = {**state, "security": deepcopy(state.get("security", {}))}
     phase = service.lifecycle.status()["phase"] if hasattr(service, "lifecycle") else "running"
-    engine.action(candidate, {"payload": {**p, "_audit": audit}, "event_id": "validation-" + key[:24]}, {"now": now, "phase": phase})
+    engine.action(candidate, {"payload": {**p, "_audit": audit}, "event_id": "validation-" + key[:24]},
+                  {"now": now, "phase": phase})
     operation = step(COORDINATOR, "pilot", p, {"generation": state["generation"]})
     if file:
         operation["file"] = file
@@ -172,16 +175,19 @@ def plan(service, actor, action, key, body, state):
     def public_record(record):
         # Stable deterministic result fields only; actual ledger event/time come from GET execution.
         return _public({name: value for name, value in record.items() if name not in {"event", "at"}})
-    table = {"context-save": "contexts", "segment-open": "segments", "action-prepare": "actions", "resource-request": "resource_requests",
+    table = {"context-save": "contexts", "segment-open": "segments", "action-prepare": "actions",
+             "resource-request": "resource_requests",
              "resource-cancel": "resource_requests", "execution-fact": "facts", "evidence-stash": "stashes"}.get(action)
     if table == "contexts":
         result["context"] = public_record(data[table][p["context_id"] + ":" + str(p["version"] + 1)])
     elif table:
         record = data[table].get(p.get("id") or p.get("resource_request_id"))
         if record is None and action == "resource-request":
-            record = next((row for row in data[table].values() if row["action_id"] == p["action_id"] and row["state"] in {"queued", "granted"}), None)
+            record = next((row for row in data[table].values()
+                           if row["action_id"] == p["action_id"] and row["state"] in {"queued", "granted"}), None)
         if record:
-            result[{"resource_requests": "resource_request", "segments": "segment", "actions": "action", "facts": "fact", "stashes": "stash"}[table]] = public_record(record)
+            result[{"resource_requests": "resource_request", "segments": "segment", "actions": "action",
+                    "facts": "fact", "stashes": "stash"}[table]] = public_record(record)
     if p.get("action_id") in data["actions"]:
         target = data["actions"][p["action_id"]]
         result["action"] = public_record(target)
@@ -198,11 +204,13 @@ def features(state):
             "features": {op: op in operations for op in ACTIONS},
             "input_download": {"json_bytes": 8388608, "zip_bytes": 150994944, "total_bytes": 134217728,
                                "file_bytes": 67108864, "files": 500, "manifest_bytes": 1048576},
-            "operations": sorted(ACTIONS if schema == 5 and ready else engine.FACT_OPS if schema == 4 and ready else []),
+            "operations": sorted(ACTIONS if schema == 5 and ready
+                                 else engine.FACT_OPS if schema == 4 and ready else []),
             "adapters": ["manual", "local-files", "isolated-worktree"], "automatic_release": False,
             "automatic_end_confirmation": False,
             "trusted_adapter_ids": sorted(state.get("security", {}).get("execution", {}).get("adapters", {})),
-            "budgets": {"evidence_stash_package": MAX_PACKAGE, "evidence_stash_expanded": MAX_EXPANDED, "evidence_stash_files": MAX_FILES},
+            "budgets": {"evidence_stash_package": MAX_PACKAGE, "evidence_stash_expanded": MAX_EXPANDED,
+                        "evidence_stash_files": MAX_FILES},
             "resource_policy": "atomic-set/conflict-fifo/unknown-blocks", "unknown_is_release": False}
 
 
@@ -216,7 +224,8 @@ def reporter_kind(state, actor, row):
     if row["executor_id"] == actor:
         return "owner"
     task = state.get("tasks", {}).get(row["task_id"], {})
-    if (rules.identity(state, actor) or {}).get("kind") == "human" and rules.manager(state, rules.task_project(task), actor):
+    if ((rules.identity(state, actor) or {}).get("kind") == "human"
+        and rules.manager(state, rules.task_project(task), actor)):
         return "human"
     adapters = state.get("security", {}).get("execution", {}).get("adapters", {})
     if any(item.get("trusted") and item.get("actor") == actor and
@@ -238,7 +247,8 @@ def audit_context(state, actor, body):
     direct = body.get("context_id") or body.get("context_version")
     context_id = body.get("context_id") or segment.get("context_id")
     context_version = body.get("context_version") or segment.get("context_version")
-    named = _row(state, "contexts", str(context_id) + ":" + str(context_version)) if context_id and context_version else {}
+    named = (_row(state, "contexts", str(context_id) + ":" + str(context_version))
+             if context_id and context_version else {})
     if not named:
         return None
     if can_profile(state, actor, named["executor_id"]):
@@ -277,29 +287,37 @@ def read(state, actor, query=None):
     selected_action = data.get("actions", {}).get(query.get("action_id"), {})
 
     def selected(row):
-        return _can_view(state, actor, row) and (not query.get("executor_id") or row.get("executor_id") == target) and all(
-            not query.get(key) or row.get(key if key != "action_id" else "action_id", row.get("id") if key == "action_id" else None) == query[key] or
+        return _can_view(state, actor, row) and (
+                not query.get("executor_id") or row.get("executor_id") == target) and all(
+            not query.get(key) or
+            row.get(key if key != "action_id" else "action_id",
+                    row.get("id") if key == "action_id" else None) == query[key] or
             key == "action_id" and row.get("id") == selected_action.get("segment_id")
             for key in ("task_id", "claim_id", "action_id")) and (bool(query) or
                 row.get("executor_id", state.get("claims", {}).get(row.get("claim_id"), {}).get("origin")) == actor)
     result = {"schema": security_schema(state, 3), "actor": actor, "executor_id": target,
-              "can_write": actor == target, "default_context": deepcopy(data.get("defaults", {}).get(target)) if profile else None,
+              "can_write": actor == target,
+              "default_context": deepcopy(data.get("defaults", {}).get(target)) if profile else None,
               "contexts": [{**row, "can_write": actor == row["executor_id"]} for row in contexts]}
     result["resource_domains"] = sorted(getattr(query, "resource_domains", []))
     for table in ("segments", "actions", "resource_requests", "grants", "facts", "stashes", "legacy", "blockers"):
         result[table] = [_public(row) for row in data.get(table, {}).values() if selected(row)]
-    result["physical_blockers"] = [deepcopy(row) for row in state.get("security", {}).get("physical_blockers", {}).values() if selected(row)]
+    result["physical_blockers"] = [deepcopy(row)
+                                   for row in state.get("security", {}).get("physical_blockers", {}).values()
+                                   if selected(row)]
     for row in result["actions"]:
         reporter = reporter_kind(state, actor, row)
         own = reporter == "owner"
-        row.update(can_prepare=own, can_request=own and row["state"] == "prepared", can_start=own and row["state"] == "granted",
+        row.update(can_prepare=own, can_request=own and row["state"] == "prepared",
+                   can_start=own and row["state"] == "granted",
                    can_report=bool(reporter), can_release=bool(reporter) and bool(row.get("grant_id")),
                    reporter_kind=reporter)
     for row in result["legacy"] + result["physical_blockers"]:
         claim = state.get("claims", {}).get(row.get("claim_id"), {})
         task = state.get("tasks", {}).get(claim.get("task_id"), {})
         own = claim.get("origin") == actor
-        human = (rules.identity(state, actor) or {}).get("kind") == "human" and rules.manager(state, rules.task_project(task), actor)
+        human = ((rules.identity(state, actor) or {}).get("kind") == "human"
+                 and rules.manager(state, rules.task_project(task), actor))
         row.setdefault("task_id", claim.get("task_id"))
         if row.get("epoch") == claim.get("epoch"):
             row.setdefault("scope_version", claim.get("W", {}).get("scope"))

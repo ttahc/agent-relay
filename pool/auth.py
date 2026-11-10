@@ -103,7 +103,8 @@ class Passwords:
         with self.lock, self.db:
             self.db.execute("DELETE FROM login_attempts WHERE first<? AND retry<=?", (now - 900, now))
             for bucket, interval, maximum in (("global", 60, 120), (key, 900, 5)):
-                row = self.db.execute("SELECT first,count,retry FROM login_attempts WHERE bucket=?", (bucket,)).fetchone()
+                row = self.db.execute("SELECT first,count,retry FROM login_attempts WHERE bucket=?",
+                                      (bucket,)).fetchone()
                 first, count, retry = row or (now, 0, 0)
                 if retry > now:
                     raise ClientError("尝试过于频繁，请稍后重试", 429)

@@ -25,13 +25,16 @@ def link(handler, invitation):
 
 def remember(service, invitation_id):
     with service.db:
-        service.db.execute("CREATE TABLE IF NOT EXISTS invite_presentations(id TEXT PRIMARY KEY, format INTEGER NOT NULL)")
+        service.db.execute("CREATE TABLE IF NOT EXISTS invite_presentations("
+                           "id TEXT PRIMARY KEY, format INTEGER NOT NULL)")
         service.db.execute("INSERT OR IGNORE INTO invite_presentations VALUES(?,2)", (invitation_id,))
 
 
 def is_current(service, invitation_id):
-    exists = service.db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='invite_presentations'").fetchone()
-    return bool(exists and service.db.execute("SELECT 1 FROM invite_presentations WHERE id=?", (invitation_id,)).fetchone())
+    exists = service.db.execute("SELECT 1 FROM sqlite_master "
+                                "WHERE type='table' AND name='invite_presentations'").fetchone()
+    return bool(exists
+                and service.db.execute("SELECT 1 FROM invite_presentations WHERE id=?", (invitation_id,)).fetchone())
 
 
 def information(handler, invitation_id, proof):

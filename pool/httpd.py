@@ -28,7 +28,8 @@ PRIVATE_V4 = tuple(map(IPv4Network, ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0
 
 
 JSON = "application/json; charset=utf-8"
-ROUND_WRITES = frozenset({"person-invite", "token-prepare", "notices-poll", "notice-ack", "notice-retry", "runner-heartbeat"})
+ROUND_WRITES = frozenset({"person-invite", "token-prepare", "notices-poll", "notice-ack", "notice-retry",
+                          "runner-heartbeat"})
 
 
 def whole_query(query):
@@ -167,14 +168,17 @@ class Server(ThreadingHTTPServer):
         if not token.isascii() or not 32 <= len(token) <= 100:
             return None
         if identity in self.tokens:
-            if hmac.compare_digest(token, self.tokens[identity]) and self.service.credential_version(identity, bootstrap=True):
+            if (hmac.compare_digest(token, self.tokens[identity])
+                and self.service.credential_version(identity, bootstrap=True)):
                 return identity
         if identity is None:
             for actor, expected in self.tokens.items():
                 if hmac.compare_digest(token, expected) and self.service.credential_version(actor, bootstrap=True):
                     return actor
         actor = self.service.account_actor(token)
-        return actor if actor and (identity is None or actor == identity) and self.service.credential_version(actor) else None
+        return (actor
+                if actor and (identity is None or actor == identity) and self.service.credential_version(actor)
+                else None)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -293,12 +297,14 @@ class Handler(BaseHTTPRequestHandler):
             auth = self.headers.get_all("Authorization", [])
             scheme, _, token = auth[0].partition(" ") if len(auth) == 1 else ("", "", "")
             body = self.request_json(round_service.MAX_SECRET_BODY)
-            status, data = round_service.bootstrap(service, api_route, body, token if scheme.lower() == "bearer" else "")
+            status, data = round_service.bootstrap(service, api_route, body,
+                                                   token if scheme.lower() == "bearer" else "")
             return status, data, JSON
         if target.scheme or target.netloc or target.fragment or not target.path.startswith("/v1/"):
             raise ClientError("接口不存在", 404)
         action = target.path[4:]
-        if not ((method == "GET" and (action in READ_ACTIONS or action.startswith("tasks/") or action.startswith("projects/"))) or
+        if not ((method == "GET" and
+                 (action in READ_ACTIONS or action.startswith("tasks/") or action.startswith("projects/"))) or
                 (method == "POST" and (action in PUBLIC_ACTIONS or action in ROUND_WRITES))):
             raise ClientError("接口不存在，请从 /ai 查看接入说明", 404)
         if self.server.is_round and method == "GET" and action == "wait":
@@ -360,11 +366,16 @@ class Handler(BaseHTTPRequestHandler):
                       instructions=[
                           "这是 AI 窗口邀请，只用于客户端 enroll。人员注册页面不使用这份 code。",
                           "读取 /ai 和下载客户端不消耗邀请码，也不需要登录或发送 code。",
-                          "按 connect_host 连接实际地址，按 url 的主机名和 certificate_sha256 核对服务证书；下载 client.url 后核对 client.sha256，再解压。",
+                          "按 connect_host 连接实际地址，按 url 的主机名和 certificate_sha256 核对服务证书；"
+                          "下载 client.url 后核对 client.sha256，再解压。",
                           "将整段 JSON 保存为 invite.json。在解压目录运行下面的客户端命令。将 window-one 换成当前窗口独有的文件名，平台和名称填写实际值。",
-                          "Windows PowerShell: & .\\ops\\round-client.ps1 --state \"$env:USERPROFILE\\.taskpool\\window-one.credential\" enroll --invite .\\invite.json --platform external --window-name \"实际聊天标题\"",
-                          "Linux/macOS: python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential enroll --invite ./invite.json --platform external --window-name '实际聊天标题'",
-                          "--platform 可选 codex、claude、gemini、external。Windows 无法找到 Python 时，将 TASKPOOL_PYTHON 设为实际 python.exe 完整路径。",
+                          "Windows PowerShell: & .\\ops\\round-client.ps1 "
+                          "--state \"$env:USERPROFILE\\.taskpool\\window-one.credential\" "
+                          "enroll --invite .\\invite.json --platform external --window-name \"实际聊天标题\"",
+                          "Linux/macOS: python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential "
+                          "enroll --invite ./invite.json --platform external --window-name '实际聊天标题'",
+                          "--platform 可选 codex、claude、gemini、external。Windows 无法找到 Python 时，"
+                          "将 TASKPOOL_PYTHON 设为实际 python.exe 完整路径。",
                           "网络中断后用相同凭据文件执行 enroll 恢复；收到 active、窗口编号和项目权限后再申报能力、查看任务。不要将 code 或执行令牌写入反馈、日志或交付物。",
                       ])
         from .invite_links import link
@@ -406,7 +417,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             except ClientError as error:
                 from .privacy import text
-                self.send(error.status, {"status": "rejected", "message": text(error), "help_url": "/ai", "client_url": "/ai-client.zip"})
+                self.send(error.status, {"status": "rejected", "message": text(error), "help_url": "/ai",
+                                         "client_url": "/ai-client.zip"})
                 return
             except TimeoutError:
                 self.send(408, {"status": "rejected", "message": "请求读取超时"})

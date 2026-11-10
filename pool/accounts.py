@@ -57,7 +57,8 @@ class Accounts:
         return row[0] if row else None
 
     def issue_executor(self, name, token, expires, credential):
-        self.db.execute("INSERT INTO enrolled_accounts VALUES(?,?,?) ON CONFLICT(name) DO UPDATE SET token_sha=excluded.token_sha",
+        self.db.execute("INSERT INTO enrolled_accounts VALUES(?,?,?) "
+                        "ON CONFLICT(name) DO UPDATE SET token_sha=excluded.token_sha",
                         (name, "executor", digest(token.encode("ascii"))))
         self.db.execute("INSERT OR REPLACE INTO executor_expiry VALUES(?,?)", (name, expires))
         self.bind_executor(name, credential)
@@ -78,7 +79,8 @@ class Accounts:
 
     def pending_executor_changes(self, state):
         blocked = set()
-        changing = {"ai-activate", "token-prepare", "credential-change", "executor-enroll", "identity-bind", "window-admin"}
+        changing = {"ai-activate", "token-prepare", "credential-change", "executor-enroll",
+                    "identity-bind", "window-admin"}
         for action, raw, raw_plan in self.db.execute("SELECT action,body,plan FROM requests WHERE status IS NULL"):
             if action not in changing:
                 continue
@@ -119,23 +121,28 @@ class Accounts:
                         self.db.execute("SELECT 1 FROM executor_credential_versions WHERE name=?", (name,)).fetchone()):
                     continue
                 enrollments = [row for key, row in state.get("round", {}).items() if key.startswith("enrollment:") and
-                               row.get("name") == name and row.get("state") == "active" and row.get("version") == credential]
+                               row.get("name") == name and row.get("state") == "active"
+                               and row.get("version") == credential]
                 proven = any(hmac.compare_digest(token_sha, digest(self.token("round-executor", row["id"],
                             f"{name}:{credential}").encode("ascii"))) for row in enrollments)
                 if not enrollments and credential == 1:
                     proven = True  # Monotonic version 1 plus no unfinished change preserves pre-mapping issuance.
                 if not proven and not enrollments:
-                    for key, raw_response in self.db.execute("SELECT key,response FROM requests WHERE action='credential-change' AND status=200"):
+                    for key, raw_response in self.db.execute(
+                            "SELECT key,response FROM requests WHERE action='credential-change' AND status=200"):
                         try:
                             response = json.loads(raw_response)
                             if response.get("issued_to") != name or not hmac.compare_digest(token_sha,
                                     digest(self.token("account", key, name).encode("ascii"))):
                                 continue
-                            events = {step.get("event_id") for step in response.get("steps", []) if step.get("result") == "applied"}
-                            proven = any(entry.get("result") == "applied" and entry.get("key", "").rsplit("/", 1)[-1] in events and
+                            events = {step.get("event_id") for step in response.get("steps", [])
+                                      if step.get("result") == "applied"}
+                            proven = any(entry.get("result") == "applied" and
+                                         entry.get("key", "").rsplit("/", 1)[-1] in events and
                                          any(effect.get("path") == ["pilot", "identity:" + name] and
                                              effect.get("value", {}).get("credential") == credential and
-                                             effect["value"].get("status") == "active" for effect in entry.get("effects", []))
+                                             effect["value"].get("status") == "active"
+                                             for effect in entry.get("effects", []))
                                          for entry in snap.get("entries", []))
                         except (ValueError, TypeError, AttributeError):
                             continue

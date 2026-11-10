@@ -9,7 +9,8 @@ from collections import Counter
 from functools import cached_property
 import json
 
-from . import delegation, execution, input_packages, release_views, round_projects, round_service, upgrade, wakeups, window_admin
+from . import (delegation, execution, input_packages, release_views, round_projects, round_service, upgrade, wakeups,
+               window_admin)
 from .constants import ID
 from .packages import ClientError
 from .privacy import public, window_source
@@ -88,7 +89,8 @@ def runner(r, argument):
 
 def notices(r, argument):
     service, state, actor, tasks = r.service, r.state, r.actor, r.tasks
-    rows = service.db.execute("SELECT event_id,task,attempts,sent,ack FROM round_notices WHERE actor=? ORDER BY seq DESC LIMIT 100",
+    rows = service.db.execute("SELECT event_id,task,attempts,sent,ack FROM round_notices WHERE actor=? "
+                              "ORDER BY seq DESC LIMIT 100",
                               (actor,))
     return {"notices": [{"event_id": event, "task_id": task, "attempts": attempts, "sent": sent,
                          "acknowledged": ack} for event, task, attempts, sent, ack in rows
@@ -123,10 +125,12 @@ def tasks(r, argument):
             task = {**task, "qualification": qualified}
         available.append(task)
     if r.round_enabled:
-        available.sort(key=lambda task: (not task["qualification"]["prioritized"], -task["priority"], task["created_seq"]))
+        available.sort(key=lambda task: (
+            not task["qualification"]["prioritized"], -task["priority"], task["created_seq"]))
     if not r.list_full:
         available = [service.task_summary(task) for task in available]
-    return {"repo_id": service.desk.meta["repo_id"], "head": r.snap["head"], "tasks": available, 'summary': not r.list_full}
+    return {"repo_id": service.desk.meta["repo_id"], "head": r.snap["head"], "tasks": available,
+            'summary': not r.list_full}
 
 
 def task_options(r, argument):
@@ -163,7 +167,8 @@ def overview(r, argument):
                       'execution_status': execution_status(state, current),
                       "project_name": project["name"] if project else None,
                       "window": (rules.identity(state, current["origin"]) or {}).get("window") if current else None,
-                      "window_name": (rules.identity(state, current["origin"]) or {}).get("window_name") if current else None,
+                      "window_name": ((rules.identity(state, current["origin"]) or {}).get("window_name")
+                                      if current else None),
                       "holder": current["origin"] if current else None,
                       "last_executor": {"id": last["origin"], "window": last_identity.get("window"),
                                         "window_name": last_identity.get("window_name")} if last else None,
@@ -180,7 +185,8 @@ def activity(r, argument):
 
 
 def project_cards(r, argument):
-    return [{**project, "members": r.service.members(r.state, project["id"])} for project in upgrade.projects(r.state, r.actor)]
+    return [{**project, "members": r.service.members(r.state, project["id"])}
+            for project in upgrade.projects(r.state, r.actor)]
 
 
 def project(r, argument):
@@ -188,8 +194,10 @@ def project(r, argument):
     project = next((p for p in upgrade.projects(state, actor) if p["id"] == argument), None)
     if not project:
         raise ClientError("项目不存在或无权查看", 404)
-    return {**project, "members": r.service.members(state, argument), "identity_choices": release_views.identities(state, actor),
-            "automation": state["round"].get("automation:" + argument, {"enabled": False, "version": 0}) if r.round_enabled else None}
+    return {**project, "members": r.service.members(state, argument),
+            "identity_choices": release_views.identities(state, actor),
+            "automation": state["round"].get("automation:" + argument, {"enabled": False, "version": 0})
+            if r.round_enabled else None}
 
 
 def projects(r, argument):
@@ -232,7 +240,8 @@ def executors(r, argument):
         joined = upgrade.projects(state, actor)
         for source in sources:
             name = source["executor_id"]
-            source.update(auto=execution_settings(state, name)["auto"], capabilities=service.capability_rows(state, actor, name)[1],
+            source.update(auto=execution_settings(state, name)["auto"],
+                          capabilities=service.capability_rows(state, actor, name)[1],
                           memberships=[{"name": p["name"], "roles": sorted(rules.grant(state, p["id"], name)["roles"])}
                                        for p in joined if rules.grant(state, p["id"], name)["roles"]])
     return {"executors": sources}
@@ -243,7 +252,9 @@ def identity(r, argument):
     data = state.get('security', {}).get('execution', {})
     return {"identity": actor, "binding": rules.identity(state, actor), "projects": upgrade.projects(state, actor),
             'default_context': data.get('defaults', {}).get(actor),
-            'active_task_contexts': [{'segment_id': key, **{k: row.get(k) for k in ('task_id', 'claim_id', 'context_id', 'context_version')}}
+            'active_task_contexts': [{'segment_id': key,
+                                      **{k: row.get(k)
+                                         for k in ('task_id', 'claim_id', 'context_id', 'context_version')}}
                 for key, row in data.get('segments', {}).items() if row.get('executor_id') == actor and
                 state['claims'].get(row.get('claim_id'), {}).get('L') == 'active']}
 
@@ -306,12 +317,14 @@ def account_table(r, argument):
             continue
         rows.append({"name": name, "kind": subject["kind"], "status": subject["status"], "owner": subject.get("owner"),
                      "credential": subject.get("credential"),
-                     "platform": subject.get("platform"), "window": subject.get("window"), "admin": rules.system_admin(state, name),
+                     "platform": subject.get("platform"), "window": subject.get("window"),
+                     "admin": rules.system_admin(state, name),
                      "window_name": subject.get("window_name"),
                      "projects": [{"name": p["name"], "roles": sorted(rules.grant(state, p["id"], name)["roles"])}
                                   for p in joined if rules.grant(state, p["id"], name)["roles"]]})
     rows.sort(key=lambda row: (row["kind"] != "human", row["name"]))
-    return rows + [{"name": name, "kind": None, "status": None, "owner": None, "platform": None, "window": None, "admin": False, "projects": []}
+    return rows + [{"name": name, "kind": None, "status": None, "owner": None, "platform": None, "window": None,
+                    "admin": False, "projects": []}
                    for name, _ in service.accounts.list() if name not in seen]
 
 

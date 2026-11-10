@@ -40,7 +40,9 @@ def render(actor, name, state, message="", status=200, attempted=None):
         grant = rules.grant(state, project["id"], name)
         roles, version = grant["roles"], grant.get("version", 0)
         current = "、".join(ROLE_NAMES.get(role, role) for role in roles) or "未加入"
-        selected = (attempted.get("roles", "") if attempted and attempted.get("project_id") == project["id"] and attempted.get("operation") == "save"
+        selected = (attempted.get("roles", "")
+                    if (attempted and attempted.get("project_id") == project["id"]
+                        and attempted.get("operation") == "save")
                     else role_value(roles) if roles else "observer")
         fixed = pages.hidden("project_id", project["id"]) + pages.hidden("version", version)
         editor = password_form(action, fixed + pages.hidden("operation", "save")
@@ -54,7 +56,9 @@ def render(actor, name, state, message="", status=200, attempted=None):
     label = subject.get("window") or name
     notice = f'<p role="status">{escape(message)}</p>' if message else ""
     back = f'/executors/{name}' if subject["kind"] == "executor" else "/accounts"
-    body = (f'<div class="phead"><h2>调整项目 · {escape(label)}</h2><a class="secondary" href="{escape(back, quote=True)}">返回{"窗口详情" if subject["kind"] == "executor" else "账号管理"}</a></div>'
+    body = (f'<div class="phead"><h2>调整项目 · {escape(label)}</h2>'
+            f'<a class="secondary" href="{escape(back, quote=True)}">'
+            f'返回{"窗口详情" if subject["kind"] == "executor" else "账号管理"}</a></div>'
             f'<p class="muted-text">身份：{escape(name)}。选择角色后提交；加入项目时默认选择观察者。'
             'AI 窗口不能担任项目管理员，实际权限同时受责任人项目授权限制。</p>' + notice
             + '<div class="table-wrap"><table><thead><tr><th>项目</th><th>当前授权</th><th>操作</th></tr></thead><tbody>'

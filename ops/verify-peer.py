@@ -29,8 +29,8 @@ def main():
     cli.add_argument("--output", type=Path)
     args = cli.parse_args()
     parsed = urlsplit(args.url)
-    if parsed.scheme != "https" or not parsed.hostname or parsed.port != 18443 or parsed.username or parsed.password or (
-            parsed.path not in {"", "/"} or parsed.query or parsed.fragment):
+    if (parsed.scheme != "https" or not parsed.hostname or parsed.port != 18443 or parsed.username or parsed.password
+            or (parsed.path not in {"", "/"} or parsed.query or parsed.fragment)):
         cli.error("use the HTTPS service origin on port 18443")
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,30}", args.run):
         cli.error("run identifier must be 1-30 letters, digits, hyphens or underscores")
@@ -99,7 +99,8 @@ def main():
             assert hashlib.sha256(content).hexdigest() == ref["sha256"]
         claim = receipt["claim"]
         values = {"claim_id": claim["claim_id"], "epoch": claim["epoch"], "scope_version": claim["W"]["scope"]}
-        text = f"# Peer evidence\n\nNetwork {args.network}, source {local}, task {args.task}, window {issued['window']}.\n"
+        text = (f"# Peer evidence\n\n"
+                f"Network {args.network}, source {local}, task {args.task}, window {issued['window']}.\n")
         post("deliver-files", token, "peer-deliver-" + args.run, **values,
              files=[{"name": "peer.md", "content": base64.b64encode(text.encode()).decode()}])
         post("stop", token, stop_id, **values, stop_evidence="对端测试已读入、封存并结束全部写入")

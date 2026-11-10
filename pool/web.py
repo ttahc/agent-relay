@@ -18,7 +18,8 @@ from .packages import ClientError, MAX_PACKAGE, strict_json
 from .service import PUBLIC_ACTIONS
 
 
-PATHS = {"/", "/login", "/logout", "/register", "/accounts", "/board.md", "/assets/taskpool.css", "/tasks/new", "/workspace-receipt"}
+PATHS = {"/", "/login", "/logout", "/register", "/accounts", "/board.md", "/assets/taskpool.css", "/tasks/new",
+         "/workspace-receipt"}
 WORKBENCH_PATHS = {"/board", "/list"}
 TASK_PATH = re.compile(r"/tasks/(T[0-9]{2,15})")
 UPGRADE_PATHS = {"/projects", "/executors", "/capabilities", "/audit", "/upgrade"}
@@ -28,7 +29,9 @@ SESSION_AGE = 8 * 60 * 60
 FILTERS = set(workbench.FILTER_KEYS)
 SESSIONS_PER_ACTOR = 8
 PAGE_HEADERS = (
-    ("Content-Security-Policy", "default-src 'none'; style-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"),
+    ("Content-Security-Policy",
+     "default-src 'none'; style-src 'self'; connect-src 'self'; form-action 'self'; base-uri 'none'; "
+     "frame-ancestors 'none'"),
     ("Referrer-Policy", "same-origin"),
 )
 STYLESHEET = Path(__file__).with_name("taskpool.css").read_bytes()
@@ -176,7 +179,8 @@ def parse_form(handler, limit, max_fields, multi=()):
     raw = handler.request_body("application/x-www-form-urlencoded", limit + (96 if handler.server.is_round else 0))
     try:
         fields = parse_qs(raw.decode("utf-8"), keep_blank_values=True, strict_parsing=True,
-                          encoding="utf-8", errors="strict", max_num_fields=max_fields + int(handler.server.is_round) + 1)
+                          encoding="utf-8", errors="strict",
+                          max_num_fields=max_fields + int(handler.server.is_round) + 1)
     except ValueError as error:
         raise ClientError("表单格式无效") from error
     if any(len(values) != 1 for key, values in fields.items() if key not in multi):
@@ -208,7 +212,8 @@ def uploads(handler):
             raise ClientError("上传字段没有有效内容")
         if name == "artifact" and filename:
             files.append({"name": filename, "content": base64.b64encode(content).decode("ascii")})
-        elif (name in {"request_id", "claim_id", "epoch", "scope_version", "supersedes_request_id"} or name in {"csrf", "stop_evidence"} and handler.server.is_round
+        elif (name in {"request_id", "claim_id", "epoch", "scope_version", "supersedes_request_id"}
+              or name in {"csrf", "stop_evidence"} and handler.server.is_round
               ) and filename is None and name not in data:
             try:
                 data[name] = content.decode("utf-8")
@@ -255,9 +260,12 @@ def json_web_response(handler, response, path):
     code = 401 if expired else 200 if status == 303 else status
     state = "pending" if code in {202, 429, 503} else "completed" if 200 <= code < 300 else "rejected"
     result = getattr(handler, "web_action_result", {})
-    received = state == "completed" or bool(result.get("request_id") == request_id and result.get("status") in {"applied", "pending", "rejected"})
+    received = (state == "completed"
+                or bool(result.get("request_id") == request_id
+                        and result.get("status") in {"applied", "pending", "rejected"}))
     value = {"status": code, "request_id": request_id, "state": state,
-             "received": received if state == "completed" or result else None, "csrf": getattr(handler, "form_token", None)}
+             "received": received if state == "completed" or result else None,
+             "csrf": getattr(handler, "form_token", None)}
     if state == "completed":
         if location:
             value["redirect_url"] = location
@@ -265,11 +273,14 @@ def json_web_response(handler, response, path):
             value["html"] = body.decode("utf-8") if isinstance(body, bytes) else body
     else:
         text = body.decode("utf-8", errors="replace") if isinstance(body, bytes) else str(body)
-        found = re.search(r'<p\b[^>]*(?:role=["\'](?:alert|status)["\']|class=["\'][^"\']*form-error)[^>]*>(.*?)</p>', text, re.S)
+        found = re.search(r'<p\b[^>]*(?:role=["\'](?:alert|status)["\']|class=["\'][^"\']*form-error)[^>]*>(.*?)</p>',
+                          text, re.S)
         value["message"] = unescape(re.sub("<[^>]+>", "", found[1])).strip() if found else (
             "登录或授权已变化，请在新页面重新登录后查询原请求。" if expired else "操作尚未确认，请核对原请求后重试。")
-    kept = tuple((name, item) for name, item in headers if name.lower() not in {"location", "content-type", "content-length"})
-    return code, json.dumps(value, ensure_ascii=False).encode(), "application/json; charset=utf-8", (*kept, ("Cache-Control", "no-store"))
+    kept = tuple((name, item) for name, item in headers
+                 if name.lower() not in {"location", "content-type", "content-length"})
+    return (code, json.dumps(value, ensure_ascii=False).encode(), "application/json; charset=utf-8",
+            (*kept, ("Cache-Control", "no-store")))
 
 
 def workspace_receipt(handler, target):
@@ -297,7 +308,8 @@ def workspace_receipt(handler, target):
                     value["redirect_url"] = "/tasks/" + quote(result["task"]["task_id"])
                 if state == "rejected":
                     steps = result.get("steps") or []
-                    value["message"] = result.get("message") or (steps[-1].get("reason") if steps else "原请求已被拒绝，修正时须使用关联的新请求编号。")
+                    value["message"] = (result.get("message")
+                                        or (steps[-1].get("reason") if steps else "原请求已被拒绝，修正时须使用关联的新请求编号。"))
                 status = 202 if state == "pending" else 200
             except ClientError as error:
                 if error.status == 404:
@@ -306,7 +318,8 @@ def workspace_receipt(handler, target):
                     value, status = {"state": "rejected", "received": None, "message": str(error)}, error.status
             value["csrf"] = getattr(handler, "form_token", None)
     value.update(status=status, request_id=request_id)
-    return status, json.dumps(value, ensure_ascii=False).encode(), "application/json; charset=utf-8", (("Cache-Control", "no-store"),)
+    return (status, json.dumps(value, ensure_ascii=False).encode(), "application/json; charset=utf-8",
+            (("Cache-Control", "no-store"),))
 
 
 def action_body(handler, action):
@@ -365,7 +378,8 @@ def action_body(handler, action):
     if action in {"project-grant", "executor-enroll"}:
         data["roles"] = split_items(data.get("roles", ""))
     if action in {"register", "task-scope"} and "dispatch_mode" in data:
-        data["dispatch"] = {"mode": data.pop("dispatch_mode"), "subjects": split_items(data.pop("dispatch_subjects", "")),
+        data["dispatch"] = {"mode": data.pop("dispatch_mode"),
+                            "subjects": split_items(data.pop("dispatch_subjects", "")),
                             "capabilities": strict_json(data.pop("dispatch_capabilities", "[]").encode("utf-8")),
                             "automation": data.pop("dispatch_automation"), "owner": data.pop("dispatch_owner", "")}
     if action == "project-automation":
@@ -433,8 +447,9 @@ def quick_registration(handler, data):
                 if len(dependencies) == 30:
                     raise ClientError("前置判据最多 30 条，请减少所选前置任务")
                 dependencies.append(item)
-    data.update(kind="documentation", requirements="\n".join(rows), iteration_goal=data.get("title", ""), iteration_previous="",
-                iteration_next="", delivery="按任务说明交付", resources="[]", dependencies=json.dumps(dependencies, ensure_ascii=False),
+    data.update(kind="documentation", requirements="\n".join(rows), iteration_goal=data.get("title", ""),
+                iteration_previous="", iteration_next="", delivery="按任务说明交付", resources="[]",
+                dependencies=json.dumps(dependencies, ensure_ascii=False),
                 review_mode="source", user_basis="", dispatch_capabilities="[]", dispatch_automation="notify")
 
 
@@ -463,7 +478,8 @@ def submit_action(handler, actor, action):
             if server.sessions.actor(session_id(handler), server.service) != actor:
                 return redirect("/login")
             status, result = server.service.submit(actor, action, body.get("request_id"), body,
-                                                   authorize=lambda: server.sessions.actor(session_id(handler), server.service))
+                                                   authorize=lambda: server.sessions.actor(
+                                                       session_id(handler), server.service))
             handler.web_action_result = result
     except ClientError as error:
         return operation_message(actor, error.status, str(error))
@@ -495,7 +511,8 @@ def submit_action(handler, actor, action):
         if action in {"identity-bind", "credential-change"}:
             return redirect("/accounts")
         if body.get("project_id"):
-            tab = {"project-grant": "?tab=members", "project-save": "?tab=settings", "project-automation": "?tab=settings"}.get(action, "") if server.is_round else ""
+            tab = ({"project-grant": "?tab=members", "project-save": "?tab=settings",
+                    "project-automation": "?tab=settings"}.get(action, "") if server.is_round else "")
             return redirect("/projects/" + quote(body["project_id"]) + tab)
         return redirect("/")
     steps = result.get("steps", [])
@@ -574,11 +591,14 @@ def account_page(handler, actor, method):
                   if code else "")
     controls = ""
     if handler.server.is_round:
-        form = (f'<form class="operation" action="/accounts" method="post">{task_pages.hidden("request_id", "invite-" + secrets.token_hex(16))}'
-                '<label>人员注册预设<select name="role" required><option value="executor">执行权限</option><option value="receiver">验收权限</option></select></label>'
+        form = ('<form class="operation" action="/accounts" method="post">'
+                f'{task_pages.hidden("request_id", "invite-" + secrets.token_hex(16))}'
+                '<label>人员注册预设<select name="role" required><option value="executor">执行权限</option>'
+                '<option value="receiver">验收权限</option></select></label>'
                 '<button class="primary" type="submit">生成邀请码</button></form>')
         links = '<p class="muted-text"><a href="/accounts/reset">签发密码重置凭据</a></p>'
-        return html_page("账号管理 · 内网任务服务", workbench_pages.accounts_page(actor, service.read(actor, "account-table"), form, invitation, links + controls))
+        return html_page("账号管理 · 内网任务服务", workbench_pages.accounts_page(
+            actor, service.read(actor, "account-table"), form, invitation, links + controls))
     return html_page("账号管理 · 内网任务服务", task_pages.workspace(actor, f"""<section class="task-panel">
   <h1>账号管理</h1>
   {invitation}
@@ -600,7 +620,9 @@ def upgrade_view(service, actor, target):
     workspace = service.round_enabled()
     if path == "/projects":
         if workspace:
-            return "项目", workbench_pages.project_index(actor, service.read(actor, "project-cards"), service.read(actor, "overview")["tasks"], service.is_admin(actor))
+            return "项目", workbench_pages.project_index(
+                actor, service.read(actor, "project-cards"), service.read(actor, "overview")["tasks"],
+                service.is_admin(actor))
         return "项目", upgrade_pages.project_index(actor, profile["projects"], service.is_admin(actor))
     if path.startswith("/projects/"):
         project = service.read(actor, "project", path.split("/")[-1])
@@ -610,20 +632,24 @@ def upgrade_view(service, actor, target):
             return "项目", workbench_pages.project_page(actor, project, tasks, service.read(actor, "activity"), tab)
         return "项目", upgrade_pages.project_page(actor, project, tasks)
     if path == "/executors" and workspace:
-        return "窗口管理", workbench_pages.windows_page(actor, profile, service.read(actor, "window-cards")["executors"], service.read(actor, "overview")["tasks"],
-                                                   parse_qs(target.query).get("archived") == ["1"])
+        return "窗口管理", workbench_pages.windows_page(
+            actor, profile, service.read(actor, "window-cards")["executors"], service.read(actor, "overview")["tasks"],
+            parse_qs(target.query).get("archived") == ["1"])
     if path == "/executors":
-        return "窗口目录", upgrade_pages.executor_index(actor, profile, service.read(actor, "executors")["executors"], service.round_enabled())
+        return "窗口目录", upgrade_pages.executor_index(
+            actor, profile, service.read(actor, "executors")["executors"], service.round_enabled())
     if path.startswith("/executors/"):
         name = path.split("/")[-1]
-        item = next((item for item in service.read(actor, "executors")["executors"] if item["executor_id"] == name), None)
+        item = next((item for item in service.read(actor, "executors")["executors"] if item["executor_id"] == name),
+                    None)
         if not item:
             raise ClientError("执行端不存在或无权查看", 404)
         return "窗口详情", upgrade_pages.executor_page(actor, item)
     if path == "/capabilities":
         from .httpd import parse_query
         query = parse_query(target.query, {"identity"})
-        return "能力与证据", upgrade_pages.capability_page(actor, profile, service.read(actor, "capabilities", query.get("identity")))
+        return "能力与证据", upgrade_pages.capability_page(
+            actor, profile, service.read(actor, "capabilities", query.get("identity")))
     if path == "/audit":
         values = parse_qs(target.query, max_num_fields=4)
         if not values.keys() <= {"task", "actor", "request", "who"} or any(len(v) != 1 for v in values.values()):
@@ -631,7 +657,9 @@ def upgrade_view(service, actor, target):
         who = values.pop("who", [""])[0]
         query = {key: value[0] for key, value in values.items()}
         if workspace:
-            return "动态", workbench_pages.activity_page(actor, service.read(actor, "activity"), who, query, service.read(actor, "audit", query) if query else {})
+            return "动态", workbench_pages.activity_page(
+                actor, service.read(actor, "activity"), who, query,
+                service.read(actor, "audit", query) if query else {})
         return "状态追溯", upgrade_pages.audit_page(actor, query, service.read(actor, "audit", query) if query else {})
     if not service.is_admin(actor):
         if parse_qs(target.query).get("migration") == ["1"]:
@@ -691,7 +719,8 @@ def dispatch_core(handler, method, target):
         try:
             if server.is_round:
                 sheet = server.service.read(actor, "sheet", match[1])
-                return html_page("任务详情 · 内网任务服务", workbench.detail(actor, sheet["view"], sheet["brief"], sheet["events"]))
+                return html_page("任务详情 · 内网任务服务",
+                                 workbench.detail(actor, sheet["view"], sheet["brief"], sheet["events"]))
             view = server.service.read(actor, "detail", match[1])
         except ClientError as error:
             return operation_message(actor, error.status, str(error))
