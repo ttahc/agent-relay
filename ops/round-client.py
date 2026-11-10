@@ -183,15 +183,17 @@ class Pool:
         self.context = ssl.create_default_context(cadata=ssl.DER_cert_to_PEM_cert(der))
         self.context.minimum_version = ssl.TLSVersion.TLSv1_2
 
-    def call(self, route, token=None, body=None, response_format="json", response_limit=None, method=None):
+    def call(self, route, token=None, body=None, response_format="json", response_limit=None, method=None, timeout=None):
         # Build once so retries of any POST retain the same request identity and bytes.
         if body is not None:
             body = {"request_id": "c-" + secrets.token_hex(16), **body}
+        if timeout is not None:
+            return bounded_retry(lambda: self._call_once(route, token, body, response_format, response_limit, method, timeout))
         if response_limit is None and method is None:
             return bounded_retry(lambda: self._call_once(route, token, body, response_format))
         return bounded_retry(lambda: self._call_once(route, token, body, response_format, response_limit, method))
 
-    def _call_once(self, route, token=None, body=None, response_format="json", response_limit=None, method=None):
+    def _call_once(self, route, token=None, body=None, response_format="json", response_limit=None, method=None, timeout=12):
         if response_format not in {"json", "text", "bytes", "file", "headers"}:
             raise ValueError("响应格式无效")
         control_limit = min(MAX_TRANSFER, getattr(self, "_taskpool_control_limit", MAX_TRANSFER))
@@ -204,9 +206,9 @@ class Pool:
         if method not in {"GET", "HEAD", "POST"} or method != "POST" and body is not None:
             raise ValueError("请求方法或请求体无效")
         if self.context:
-            connection = RoutedHTTPSConnection(self.host, self.port, self.connect_host, self.context, timeout=12)
+            connection = RoutedHTTPSConnection(self.host, self.port, self.connect_host, self.context, timeout=timeout)
         else:
-            connection = HTTPConnection(self.host, self.port, timeout=12)
+            connection = HTTPConnection(self.host, self.port, timeout=timeout)
         try:
             connection.connect()
             if self.context and hashlib.sha256(connection.sock.getpeercert(binary_form=True)).hexdigest() != self.pin:
@@ -1403,6 +1405,110 @@ def poll(state, api):
     return value
 
 
+WAIT_HOLD = 50  # seconds one waiting request stays open; the service states its own limit in features
+WAIT_NEXT = {"task-ready": "tasks 查看可领取任务，claim 领取", "review-returned": "poll 查看返修要求，再 show 任务",
+             "review-requested": "show 任务后验收或退回", "scope-changed": "show 任务核对新范围后继续",
+             "interrupted": "show 任务，核对中断原因和待核记录", "cancel-requested": "show 任务，按取消请求收尾",
+             "resource-granted": "execution 查看授权，再用 action 申请开始许可"}
+
+
+def wait_limit(api, token):
+    """Seconds one waiting request may stay open, or 0 when the service has no waiting interface."""
+    features = server_features(api, token)
+    limit = (features.get("wait") or {}).get("max_seconds") if isinstance(features.get("wait"), dict) else None
+    return min(WAIT_HOLD, limit) if supported(features, "wait") and type(limit) is int and limit > 0 else 0
+
+
+def wait_once(api, token, cursor, hold):
+    """Keep one request open until this window's events change or the hold ends."""
+    value = api.call("wait?" + urlencode({"cursor": cursor, "timeout": hold} if cursor else {"timeout": hold}),
+                     token, timeout=hold + 15)
+    events = value.get("events") if isinstance(value, dict) else None
+    if (not isinstance(events, list) or not isinstance(value.get("cursor"), str) or not re.fullmatch(r"[0-9a-f]{64}", value["cursor"]) or
+            any(not isinstance(event, dict) or not isinstance(event.get("key"), str) or not isinstance(event.get("type"), str)
+                for event in events)):
+        raise ValueError("服务返回的等待结果无效")
+    return value["cursor"], events
+
+
+def wait_for_events(state, args):
+    """Return when the service reports something new for this window, or when the time runs out.
+
+    The credential lock is held only to read the token and to record what was reported, so other
+    commands of this window keep working while this one waits.
+    """
+    if not 0 <= args.timeout <= 86400:
+        raise ValueError("等待时长须为 0 至 86400 秒")
+    with state.exclusive():
+        api = endpoint(state, args)
+        token = state.data["token"]
+        seen = set(state.data.get("wait_seen", []))
+        hold_limit = wait_limit(api, token)
+    if not hold_limit:
+        raise ValueError("当前服务未声明支持 wait；请改用 poll 定时查询，或升级服务")
+    started = time.monotonic()
+    cursor, pause, events = "", 2, []
+    while True:
+        remaining = args.timeout - (time.monotonic() - started)
+        hold = min(hold_limit, int(remaining) + (remaining > int(remaining))) if remaining > 0 else 0  # whole seconds, rounded up
+        try:
+            cursor, events = wait_once(api, token, cursor, hold)
+            pause = 2
+        except (OSError, HTTPException, RequestError) as error:
+            if isinstance(error, RequestError) and error.status == 401:
+                with state.exclusive():  # another command of this window may have activated a new token meanwhile
+                    current = state.data.get("token")
+                if not current or current == token:
+                    raise
+                token = current
+                continue
+            if isinstance(error, RequestError) and error.status not in {408, 429, 502, 503, 504}:
+                raise
+            left = args.timeout - (time.monotonic() - started)
+            if left <= 0:
+                return {"status": "idle", "waited": round(time.monotonic() - started), "pending": len(events),
+                        "notice": "服务暂时无法应答：" + safe_error(error)}
+            time.sleep(min(left, pause + random.uniform(0, 1)))
+            pause = min(30, pause * 2)
+            continue
+        keys = [event["key"] for event in events]
+        fresh = [event for event in events if event["key"] not in seen]
+        if set(keys) != seen:
+            seen = set(keys)
+            for _ in range(10):
+                try:
+                    with state.exclusive():
+                        state.data["wait_seen"] = keys
+                        state.save()
+                    break
+                except ValueError:
+                    time.sleep(.3)  # another command of this window holds the credential for a moment
+        if fresh:
+            hints = []
+            for event in fresh:
+                if WAIT_NEXT.get(event["type"]) and WAIT_NEXT[event["type"]] not in hints:
+                    hints.append(WAIT_NEXT[event["type"]])
+            return {"status": "changed", "events": [{k: v for k, v in event.items() if k != "key"} for event in fresh],
+                    "pending": len(events), "next": hints}
+        if not hold or time.monotonic() - started >= args.timeout:
+            return {"status": "idle", "waited": round(time.monotonic() - started), "pending": len(events)}
+
+
+def pause_until_change(state, api, cursor):
+    """Between two polls of the run loop: wait for a change when the service can report one, otherwise sleep."""
+    try:
+        hold = min(30, wait_limit(api, state.data["token"]))
+        if hold:
+            changed, _ = wait_once(api, state.data["token"], cursor, hold)
+            if changed != cursor:
+                time.sleep(random.uniform(.5, 1.5))
+            return changed
+    except (OSError, HTTPException, RequestError, ValueError):
+        pass
+    time.sleep(random.uniform(24, 36))
+    return cursor
+
+
 def report(api, token, claim, phase, evidence, request):
     return api.call("run-report", token, {"request_id": request, "claim_id": claim["claim_id"], "epoch": claim["epoch"],
                                          "scope_version": claim["W"]["scope"], "state": phase, "evidence": evidence})
@@ -1694,6 +1800,8 @@ def build_parser():
         else:
             command.add_argument("--file", type=Path, action="append", required=True)
     commands.add_parser("poll")
+    wait = commands.add_parser("wait", help="等待服务端事件：有新任务、返修、待验收、范围变更、中断或资源授权时返回")
+    wait.add_argument("--timeout", type=int, default=600, help="最长等待秒数（默认 600）；到时返回 idle")
     configure = commands.add_parser("configure")
     configure.add_argument("--limit", type=int, default=1)
     configure.add_argument("--heartbeat", action="store_true")
@@ -1755,12 +1863,13 @@ def configure_runner(state, api, args):
 def run_loop(state, api, args):
     if state.data.get("pending_write"):
         raise ValueError("有待确认写入，请先运行 pending 和 retry，再启动自动执行")
+    cursor = ""
     while True:
         value = run_once(state, api)
         if args.once:
             return value
         print(json.dumps(public_value(value), ensure_ascii=False), flush=True)
-        time.sleep(random.uniform(24, 36))
+        cursor = pause_until_change(state, api, cursor)
 
 
 # Commands answered from the credential file alone.  Each entry looks its function up
@@ -1815,6 +1924,9 @@ def main():
     try:
         state = State(args.state)
         state.supersedes_request_id = getattr(args, 'supersedes_request_id', None)
+        if args.action == "wait":
+            print(json.dumps(public_value(wait_for_events(state, args)), ensure_ascii=False, indent=2), flush=True)
+            return 0
         with state.exclusive():
             value = run_command(state, args)
             print(value if isinstance(value, str) else json.dumps(public_value(value), ensure_ascii=False, indent=2), flush=True)
