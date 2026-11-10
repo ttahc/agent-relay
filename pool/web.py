@@ -658,23 +658,7 @@ def dispatch_core(handler, method, target):
     current = session_id(handler)
     actor = server.sessions.actor(current, service)
     if method == "GET" and path in {"/", "/login"}:
-        if not actor:
-            return login()
-        if path == "/login":
-            return redirect("/")
-        query = {}
-        if server.is_round:
-            try:
-                values = parse_qs(target.query, max_num_fields=len(FILTERS), keep_blank_values=True, strict_parsing=True)
-            except ValueError as error:
-                raise ClientError("筛选参数无效") from error
-            if not values.keys() <= FILTERS or any(len(v) != 1 for v in values.values()):
-                raise ClientError("筛选参数无效")
-            query = {k: v[0] for k, v in values.items() if v[0]}
-        data = service.read(actor, "overview", query.get("project"))
-        if server.is_round:
-            return html_page("我的工作 · 内网任务服务", workbench.mine_page(actor, data, query))
-        return html_page("任务看板 · 内网任务服务", task_pages.overview(actor, data))
+        return home_page(handler, target, actor)
     if method == "GET" and path == "/board.md":
         if not actor:
             return redirect("/login")
@@ -682,26 +666,7 @@ def dispatch_core(handler, method, target):
             ("Content-Disposition", 'attachment; filename="task-board.md"'), *PAGE_HEADERS,
         )
     if method == "POST" and path in {"/login", "/logout"}:
-        if not same_origin(handler):
-            return login(error="请从当前登录页重新提交。", status=403)
-        if path == "/logout":
-            if server.is_round:
-                parse_form(handler, 64, 0)
-            server.sessions.end(current)
-            handler.web_operation_completed = True
-            return redirect("/login", session_cookie(handler, "", 0))
-        try:
-            fields = parse_form(handler, 1024, 2)
-            if set(fields) != {"identity", "token"}:
-                raise ValueError("Invalid form fields")
-        except ValueError:
-            return login(error="请填写身份和访问令牌。", status=400)
-        identity, token = fields["identity"].strip(), fields["token"].strip()
-        with service.lock:
-            if server.actor_for_token(token, identity):
-                issued = server.sessions.create(identity, current, service.session_version(identity))
-                return redirect("/", session_cookie(handler, issued, SESSION_AGE))
-        return login(identity[:80], error="身份或访问令牌有误。", status=401)
+        return session_change(handler, path, current)
     if path == "/register" and method in {"GET", "POST"}:
         return register_account(handler, method)
     if not actor:
@@ -709,13 +674,7 @@ def dispatch_core(handler, method, target):
     if path == "/accounts" and method in {"GET", "POST"}:
         return account_page(handler, actor, method)
     if method == "GET" and server.is_round and path in WORKBENCH_PATHS:
-        try:
-            values = parse_qs(target.query, max_num_fields=len(FILTERS), keep_blank_values=True, strict_parsing=bool(target.query))
-        except ValueError as error:
-            raise ClientError("筛选参数无效") from error
-        if not values.keys() <= FILTERS or any(len(v) != 1 for v in values.values()):
-            raise ClientError("筛选参数无效")
-        query = {k: v[0] for k, v in values.items() if v[0]}
+        query = filter_query(target, bool(target.query))
         data = service.read(actor, "overview", query.get("project"))
         if path == "/board":
             return html_page("任务看板 · 内网任务服务", workbench.board(actor, data, query))
@@ -727,31 +686,7 @@ def dispatch_core(handler, method, target):
             return operation_message(actor, error.status if isinstance(error, ClientError) else 400, str(error))
         return html_page(title + " · 内网任务服务", content)
     if method == "GET" and path == "/tasks/new":
-        overview = service.read(actor, "overview")
-        if overview["upgraded"]:
-            from .httpd import parse_query
-            query = parse_query(target.query, {"project"})
-            if server.is_round:
-                allowed = [p for p in overview["projects"] if {"manager", "receiver"} & set(p["roles"])]
-                if not allowed:
-                    return operation_message(actor, 403, "当前角色不能直接新建任务。报告者可以在「反馈与决定」提需求，由项目管理员转为任务。")
-                project = next((p for p in allowed if p["id"] == query.get("project")), allowed[0])
-                receivers = service.read(actor, "receivers", project["id"]) if "manager" in project["roles"] else [actor]
-                return html_page("新建任务 · 内网任务服务", workbench.new_task(
-                    actor, allowed, project, receivers, service.read(actor, "project-capabilities", project["id"]),
-                    service.read(actor, "project", project["id"])["members"], overview["tasks"]))
-            allowed = [p for p in overview["projects"] if {"manager", "receiver"} & set(p["roles"]) and
-                       (not query or p["id"] == query.get("project"))]
-            if len(allowed) != 1:
-                return redirect("/projects") if allowed else operation_message(actor, 403, "需要项目登记授权。")
-            project = allowed[0]
-            receivers = service.read(actor, "receivers", project["id"]) if "manager" in project["roles"] else [actor]
-            return html_page("登记任务 · 内网任务服务", upgrade_pages.task_form(actor, project, receivers, server.is_round))
-        roles = overview["roles"]
-        if not {"receiver", "admin"} & set(roles):
-            return operation_message(actor, 403, "仅管理员或接收者可登记资料任务。")
-        receivers = server.service.read(actor, "receivers") if "admin" in roles else None
-        return html_page("登记任务 · 内网任务服务", task_pages.new_task(actor, receivers))
+        return new_task_page(handler, target, actor)
     if method == "GET" and (match := TASK_PATH.fullmatch(path)):
         try:
             if server.is_round:
@@ -762,21 +697,107 @@ def dispatch_core(handler, method, target):
             return operation_message(actor, error.status, str(error))
         return html_page("任务详情 · 内网任务服务", task_pages.detail(actor, view))
     if method == "GET" and path == "/download":
-        try:
-            query = parse_qs(target.query, strict_parsing=True, max_num_fields=1)
-            if set(query) != {"path"}:
-                raise ValueError("Invalid download fields")
-        except ValueError:
-            return operation_message(actor, 400, "需要一个文件引用。")
-        artifact = query["path"][0]
-        try:
-            raw = server.service.read(actor, "artifact", artifact)
-        except ClientError as error:
-            return operation_message(actor, error.status, str(error))
-        filename = quote(artifact.rsplit("/", 1)[-1], safe="")
-        return 200, raw, "application/octet-stream", (
-            ("Content-Disposition", f"attachment; filename*=UTF-8''{filename}"), *PAGE_HEADERS,
-        )
+        return download(handler, target, actor)
     if method == "POST" and path.startswith("/actions/"):
         return submit_action(handler, actor, path.removeprefix("/actions/"))
     raise ClientError("页面不存在", 404)
+
+
+def filter_query(target, strict):
+    """The workbench filters of a page request; ``strict`` also rejects a malformed or empty query string."""
+    try:
+        values = parse_qs(target.query, max_num_fields=len(FILTERS), keep_blank_values=True, strict_parsing=strict)
+    except ValueError as error:
+        raise ClientError("筛选参数无效") from error
+    if not values.keys() <= FILTERS or any(len(v) != 1 for v in values.values()):
+        raise ClientError("筛选参数无效")
+    return {k: v[0] for k, v in values.items() if v[0]}
+
+
+def home_page(handler, target, actor):
+    server = handler.server
+    if not actor:
+        return login()
+    if target.path == "/login":
+        return redirect("/")
+    query = {}
+    if server.is_round:
+        query = filter_query(target, True)
+    data = server.service.read(actor, "overview", query.get("project"))
+    if server.is_round:
+        return html_page("我的工作 · 内网任务服务", workbench.mine_page(actor, data, query))
+    return html_page("任务看板 · 内网任务服务", task_pages.overview(actor, data))
+
+
+def session_change(handler, path, current):
+    """POST /login with an identity and access token, or POST /logout."""
+    server = handler.server
+    service = server.service
+    if not same_origin(handler):
+        return login(error="请从当前登录页重新提交。", status=403)
+    if path == "/logout":
+        if server.is_round:
+            parse_form(handler, 64, 0)
+        server.sessions.end(current)
+        handler.web_operation_completed = True
+        return redirect("/login", session_cookie(handler, "", 0))
+    try:
+        fields = parse_form(handler, 1024, 2)
+        if set(fields) != {"identity", "token"}:
+            raise ValueError("Invalid form fields")
+    except ValueError:
+        return login(error="请填写身份和访问令牌。", status=400)
+    identity, token = fields["identity"].strip(), fields["token"].strip()
+    with service.lock:
+        if server.actor_for_token(token, identity):
+            issued = server.sessions.create(identity, current, service.session_version(identity))
+            return redirect("/", session_cookie(handler, issued, SESSION_AGE))
+    return login(identity[:80], error="身份或访问令牌有误。", status=401)
+
+
+def new_task_page(handler, target, actor):
+    server = handler.server
+    service = server.service
+    overview = service.read(actor, "overview")
+    if overview["upgraded"]:
+        from .httpd import parse_query
+        query = parse_query(target.query, {"project"})
+        if server.is_round:
+            allowed = [p for p in overview["projects"] if {"manager", "receiver"} & set(p["roles"])]
+            if not allowed:
+                return operation_message(actor, 403, "当前角色不能直接新建任务。报告者可以在「反馈与决定」提需求，由项目管理员转为任务。")
+            project = next((p for p in allowed if p["id"] == query.get("project")), allowed[0])
+            receivers = service.read(actor, "receivers", project["id"]) if "manager" in project["roles"] else [actor]
+            return html_page("新建任务 · 内网任务服务", workbench.new_task(
+                actor, allowed, project, receivers, service.read(actor, "project-capabilities", project["id"]),
+                service.read(actor, "project", project["id"])["members"], overview["tasks"]))
+        allowed = [p for p in overview["projects"] if {"manager", "receiver"} & set(p["roles"]) and
+                   (not query or p["id"] == query.get("project"))]
+        if len(allowed) != 1:
+            return redirect("/projects") if allowed else operation_message(actor, 403, "需要项目登记授权。")
+        project = allowed[0]
+        receivers = service.read(actor, "receivers", project["id"]) if "manager" in project["roles"] else [actor]
+        return html_page("登记任务 · 内网任务服务", upgrade_pages.task_form(actor, project, receivers, server.is_round))
+    roles = overview["roles"]
+    if not {"receiver", "admin"} & set(roles):
+        return operation_message(actor, 403, "仅管理员或接收者可登记资料任务。")
+    receivers = server.service.read(actor, "receivers") if "admin" in roles else None
+    return html_page("登记任务 · 内网任务服务", task_pages.new_task(actor, receivers))
+
+
+def download(handler, target, actor):
+    try:
+        query = parse_qs(target.query, strict_parsing=True, max_num_fields=1)
+        if set(query) != {"path"}:
+            raise ValueError("Invalid download fields")
+    except ValueError:
+        return operation_message(actor, 400, "需要一个文件引用。")
+    artifact = query["path"][0]
+    try:
+        raw = handler.server.service.read(actor, "artifact", artifact)
+    except ClientError as error:
+        return operation_message(actor, error.status, str(error))
+    filename = quote(artifact.rsplit("/", 1)[-1], safe="")
+    return 200, raw, "application/octet-stream", (
+        ("Content-Disposition", f"attachment; filename*=UTF-8''{filename}"), *PAGE_HEADERS,
+    )
