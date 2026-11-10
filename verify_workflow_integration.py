@@ -6,8 +6,8 @@ No storage checks or ledger proof validation are mocked.
 """
 import json
 from pathlib import Path
-import shutil
 import sys
+import zipfile
 
 from verify import ROOT, claim_args, server, sha
 from verify_support import scratch
@@ -20,6 +20,7 @@ def exercise(project):
     with server(project) as (_, url):
         browser = Browser(url)
         browser.login('admin', password)
+        browser.send('/')  # a signed-in page supplies the form token the admin actions need
         admin = browser_admin_api(project, browser)
         bind(admin, 'reviewer', 'receiver')
         bind(admin, 'worker-a', 'executor')
@@ -89,9 +90,9 @@ def main():
         return 2
     with scratch('wf-') as directory:
         project = Path(directory)
-        for name in ('pool', 'vendor'):
-            shutil.copytree(ROOT / name, project / name, ignore=shutil.ignore_patterns('__pycache__'))
-        shutil.copy2(ROOT / 'taskpool.py', project / 'taskpool.py')
+        # Run the packaged release like the other end-to-end checks; the server needs the built client bundle.
+        with zipfile.ZipFile(ROOT / 'dist' / 'task-pool-local.zip') as package:
+            package.extractall(project)
         try:
             result = exercise(project)
         except RuntimeError as error:
