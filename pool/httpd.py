@@ -26,6 +26,53 @@ from 协作存储 import encoded
 PRIVATE_V4 = tuple(map(IPv4Network, ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")))
 
 
+JSON = "application/json; charset=utf-8"
+ROUND_WRITES = frozenset({"person-invite", "token-prepare", "notices-poll", "notice-ack", "notice-retry", "runner-heartbeat"})
+
+
+def whole_query(query):
+    return query
+
+
+def one_value(name):
+    return lambda query: query.get(name)
+
+
+def listing_query(query):
+    if 'full' in query and query['full']!='1':raise ClientError('full 只接受1')
+    return query if 'full' in query else query.get('project')
+
+
+# GET /v1/<action>: the query keys it accepts (None: it takes no query), how the parsed query
+# becomes the argument of Service.read, the content type, and whether only round mode serves it.
+READ_API = {
+    "features": (None, None, JSON, False),
+    "execution": ({'task_id','claim_id','action_id','executor_id'}, whole_query, JSON, False),
+    "input-package": ({'task_id','scope_version','claim_id'}, whole_query, "application/zip", False),
+    "release-readiness": (None, None, JSON, False),
+    "window-impact": ({"name"}, one_value("name"), JSON, False),
+    "capability-requests": (None, None, JSON, False),
+    "tasks": ({"project",'full'}, listing_query, JSON, False),
+    "task-options": ({"project",'full'}, listing_query, JSON, False),
+    "board": (None, None, "text/markdown; charset=utf-8", False),
+    "projects": (None, None, JSON, False),
+    "executors": (None, None, JSON, False),
+    "identity": (None, None, JSON, False),
+    "upgrade": (None, None, JSON, False),
+    "invitations": (None, None, JSON, True),
+    "runner": (None, None, JSON, True),
+    "notices": (None, None, JSON, True),
+    "delegations": (None, None, JSON, True),
+    "cleanup": (None, None, JSON, True),
+    "collaboration": ({"project"}, one_value("project"), JSON, True),
+    "capabilities": ({"identity"}, one_value("identity"), JSON, False),
+    "audit": ({"task", "actor", "request"}, whole_query, JSON, False),
+    "receipt": ({"request"}, one_value("request"), JSON, False),
+}
+READ_API_PREFIXES = (("tasks/", "task"), ("projects/", "project"))  # GET /v1/tasks/<id>, /v1/projects/<id>
+READ_ACTIONS = frozenset(READ_API) | {"artifact"}
+
+
 class Server(ThreadingHTTPServer):
     daemon_threads = False
 
@@ -206,29 +253,8 @@ class Handler(BaseHTTPRequestHandler):
             raise ClientError("Host 与服务监听不匹配")
         service = self.server.service
         target = urlsplit(self.path)
-        if method == "GET" and self.path == "/v1/service-status":
-            self.authenticate()
-            return 200, self.server.lifecycle.status(), "application/json; charset=utf-8"
-        from . import invite_links
-        if method == "GET" and (match := invite_links.INVITE_PATH.fullmatch(target.path)) and not target.query:
-            return invite_links.page(match[1])
-        if method == "GET" and self.path == "/assets/ai-invite.js":
-            return 200, invite_links.SCRIPT, "text/javascript; charset=utf-8"
-        if method == "GET" and target.path == "/v1/ai-invite-info":
-            query = parse_query(target.query, {"invite_id"})
-            headers = self.headers.get_all("Authorization", [])
-            scheme, _, proof = headers[0].partition(" ") if len(headers) == 1 else ("", "", "")
-            if scheme.lower() != "bearer" or not re.fullmatch(r"[A-Za-z0-9_-]{43}", proof):
-                raise ClientError("需要完整邀请链接中的凭据", 401)
-            return 200, invite_links.information(self, query.get("invite_id"), proof), "application/json; charset=utf-8"
-        if method == "GET" and self.path == "/ai-client.zip":
-            if self.server.client_archive is None:
-                raise ClientError("客户端包尚未构建，请管理员检查发行包", 503)
-            return 200, self.server.client_archive, "application/zip", (
-                ("Content-Disposition", 'attachment; filename="taskpool-ai-client.zip"'),
-            )
-        if method == "GET" and self.path == "/ai":
-            return round_web.ai_entry()
+        if method == "GET" and (response := entry_page(self, target)) is not None:
+            return response
         if not (target.scheme or target.netloc or target.fragment) and web.matches(target):
             if method == "GET":
                 with service.lock, service.one_snapshot():
@@ -239,7 +265,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.server.tls and method == "GET" and self.path == "/healthz":
             with service.lock:
                 service.snapshot()
-            return 200, {"status": "ok", "service": "intranet-task-pool"}, "application/json; charset=utf-8"
+            return 200, {"status": "ok", "service": "intranet-task-pool"}, JSON
         api_route = target.path[4:] if target.path.startswith("/v1/") and not (
             target.scheme or target.netloc or target.fragment or target.query
         ) else ""
@@ -248,86 +274,21 @@ class Handler(BaseHTTPRequestHandler):
             scheme, _, token = auth[0].partition(" ") if len(auth) == 1 else ("", "", "")
             body = self.request_json(round_service.MAX_SECRET_BODY)
             status, data = round_service.bootstrap(service, api_route, body, token if scheme.lower() == "bearer" else "")
-            return status, data, "application/json; charset=utf-8"
+            return status, data, JSON
         if target.scheme or target.netloc or target.fragment or not target.path.startswith("/v1/"):
             raise ClientError("接口不存在", 404)
         action = target.path[4:]
-        reads = {"features", "execution", "tasks", "task-options", "board", "projects", "executors", "identity", "upgrade", "invitations", "runner", "window-impact", "capability-requests", "release-readiness", "input-package",
-                 "notices", "collaboration", "capabilities", "audit", "receipt", "artifact", "delegations", "cleanup"}
-        writes = PUBLIC_ACTIONS | {"person-invite", "token-prepare", "notices-poll", "notice-ack", "notice-retry", "runner-heartbeat"}
-        if not ((method == "GET" and (action in reads or action.startswith("tasks/") or action.startswith("projects/"))) or
-                (method == "POST" and action in writes)):
+        if not ((method == "GET" and (action in READ_ACTIONS or action.startswith("tasks/") or action.startswith("projects/"))) or
+                (method == "POST" and (action in PUBLIC_ACTIONS or action in ROUND_WRITES))):
             raise ClientError("接口不存在，请从 /ai 查看接入说明", 404)
         actor = self.authenticate()
-        if self.server.is_round and method == "POST" and api_route in {
-            "person-invite", "token-prepare", "notices-poll", "notice-ack", "notice-retry", "runner-heartbeat"
-        }:
-            body = self.request_json(round_service.MAX_SECRET_BODY)
-            with service.lock:
-                actor = self.authenticate()
-                state = service.snapshot()["state"]
-                if state["pilot"]["format"]["maintenance"]:
-                    raise ClientError("服务处于维护窗口", 503)
-                if action == "person-invite":
-                    from .packages import fields
-                    fields(body, "request_id role")
-                    value = {"code": service.invite(actor, body["request_id"], body["role"])}
-                    return 200, value, "application/json; charset=utf-8"
-                if action == "runner-heartbeat":
-                    from .packages import fields
-                    fields(body, "request_id")
-                    if not round_service.execution_settings(state, actor)["heartbeat"]:
-                        raise ClientError("执行端未启用心跳", 403)
-                    with service.db:
-                        service.notices.pulse(actor)
-                    return 200, {"status": "received"}, "application/json; charset=utf-8"
-                if action == "token-prepare":
-                    status, value = round_service.prepare_token(service, actor, body)
-                    return status, value, "application/json; charset=utf-8"
-                if action == "notices-poll":
-                    value = service.notices.poll(state, actor, body, service)
-                elif action == "notice-ack":
-                    value = service.notices.acknowledge(actor, body)
-                else:
-                    value = service.notices.retry(state, actor, body)
-                return 200, value, "application/json; charset=utf-8"
+        if self.server.is_round and method == "POST" and api_route in ROUND_WRITES:
+            return round_write(self, action)
         if method == "POST" and action in PUBLIC_ACTIONS and not target.query:
-            body = self.request_json()
-            reported = self.headers.get("X-TaskPool-Reported-At")
-            if reported:
-                try:
-                    if len(reported) > 40 or datetime.fromisoformat(reported).tzinfo is None:
-                        raise ValueError
-                except ValueError as error:
-                    raise ClientError("客户端报告时间须为带时区的 ISO 时间") from error
-            with service.lock:
-                actor = self.authenticate()
-                status, response = service.submit(actor, action, body["request_id"], body, reported_utc=reported,
-                                                  authorize=self.authenticate)
-                if action == "ai-invite" and response.get("invitation"):
-                    response = {**response, "invitation": self.invitation_bundle(response["invitation"])}
-                    from .invite_links import remember
-                    remember(service, response["invitation"]["id"])
-            return status, response, "application/json; charset=utf-8"
+            return submit_write(self, action)
         if method == "GET":
             if action == 'input-package':
-                from .input_packages import select, generate
-                query = parse_query(target.query, {'task_id','scope_version','claim_id'})
-                with service.lock:
-                    actor = self.authenticate()
-                    selected = select(service,actor,service.snapshot()['state'],query)
-                    version = service.credential_version(actor)
-                stream, manifest_sha = generate(service,actor,selected)
-                try:
-                    with service.lock:
-                        if self.authenticate() != actor or service.credential_version(actor) != version:
-                            raise ClientError('下载期间凭据已变化，请重新核对',401)
-                        if select(service,actor,service.snapshot()['state'],query) != selected:
-                            raise ClientError('下载期间冻结输入已变化，原文件保留',409)
-                    return 200, stream, 'application/zip', (('X-TaskPool-Manifest-SHA256',manifest_sha),)
-                except BaseException:
-                    stream.close()
-                    raise
+                return download_inputs(self, target)
             with service.lock, service.one_snapshot():
                 actor = self.authenticate()
                 return self.read_api(action, target, actor)
@@ -335,51 +296,16 @@ class Handler(BaseHTTPRequestHandler):
 
     def read_api(self, action, target, actor):
         service = self.server.service
-        if action == 'features' and not target.query:
-            return 200, service.read(actor,action), 'application/json; charset=utf-8'
-        if action == 'execution':
-            query = parse_query(target.query, {'task_id','claim_id','action_id','executor_id'})
-            return 200, service.read(actor,action,query), 'application/json; charset=utf-8'
-        if action=='input-package':
-            query=parse_query(target.query,{'task_id','scope_version','claim_id'})
-            return 200,service.read(actor,action,query),'application/zip'
-        if action=='release-readiness' and not target.query:
-            return 200,service.read(actor,action),"application/json; charset=utf-8"
-        if action == "window-impact":
-            query = parse_query(target.query, {"name"})
-            return 200, service.read(actor, action, query.get("name")), "application/json; charset=utf-8"
-        if action == "capability-requests" and not target.query:
-            return 200, service.read(actor, action), "application/json; charset=utf-8"
-        if action == "tasks":
-            query = parse_query(target.query, {"project",'full'})
-            if 'full' in query and query['full']!='1':raise ClientError('full 只接受1')
-            return 200, service.read(actor, "tasks", query if 'full' in query else query.get('project')), "application/json; charset=utf-8"
-        if action == "task-options":
-            query = parse_query(target.query, {"project",'full'})
-            if 'full' in query and query['full']!='1':raise ClientError('full 只接受1')
-            return 200, service.read(actor, action, query if 'full' in query else query.get('project')), "application/json; charset=utf-8"
-        if action.startswith("tasks/") and not target.query:
-            return 200, service.read(actor, "task", action[6:]), "application/json; charset=utf-8"
-        if action == "board" and not target.query:
-            return 200, service.read(actor, "board"), "text/markdown; charset=utf-8"
-        if action in {"projects", "executors", "identity", "upgrade"} and not target.query:
-            return 200, service.read(actor, action), "application/json; charset=utf-8"
-        if self.server.is_round and action in {"invitations", "runner", "notices", "delegations", "cleanup"} and not target.query:
-            return 200, service.read(actor, action), "application/json; charset=utf-8"
-        if self.server.is_round and action == "collaboration":
-            query = parse_query(target.query, {"project"})
-            return 200, service.read(actor, action, query.get("project")), "application/json; charset=utf-8"
-        if action.startswith("projects/") and not target.query:
-            return 200, service.read(actor, "project", action[9:]), "application/json; charset=utf-8"
-        if action == "capabilities":
-            query = parse_query(target.query, {"identity"})
-            return 200, service.read(actor, action, query.get("identity")), "application/json; charset=utf-8"
-        if action == "audit":
-            query = parse_query(target.query, {"task", "actor", "request"})
-            return 200, service.read(actor, action, query), "application/json; charset=utf-8"
-        if action == "receipt":
-            query = parse_query(target.query, {"request"})
-            return 200, service.read(actor, action, query.get("request")), "application/json; charset=utf-8"
+        if action in READ_API:
+            allowed, argument, kind, round_only = READ_API[action]
+            if not round_only or self.server.is_round:
+                if allowed is not None:
+                    return 200, service.read(actor, action, argument(parse_query(target.query, allowed))), kind
+                if not target.query:
+                    return 200, service.read(actor, action), kind
+        for prefix, route in READ_API_PREFIXES:
+            if action.startswith(prefix) and not target.query:
+                return 200, service.read(actor, route, action[len(prefix):]), JSON
         if action == "artifact":
             try:
                 query = parse_qs(target.query, max_num_fields=1, keep_blank_values=True)
@@ -483,6 +409,112 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_HEAD(self):
         self.handle_api("GET")
+
+
+def entry_page(handler, target):
+    """GET routes served before any page or API routing: status, AI invitations and the client package."""
+    if handler.path == "/v1/service-status":
+        handler.authenticate()
+        return 200, handler.server.lifecycle.status(), JSON
+    from . import invite_links
+    if (match := invite_links.INVITE_PATH.fullmatch(target.path)) and not target.query:
+        return invite_links.page(match[1])
+    if handler.path == "/assets/ai-invite.js":
+        return 200, invite_links.SCRIPT, "text/javascript; charset=utf-8"
+    if target.path == "/v1/ai-invite-info":
+        query = parse_query(target.query, {"invite_id"})
+        headers = handler.headers.get_all("Authorization", [])
+        scheme, _, proof = headers[0].partition(" ") if len(headers) == 1 else ("", "", "")
+        if scheme.lower() != "bearer" or not re.fullmatch(r"[A-Za-z0-9_-]{43}", proof):
+            raise ClientError("需要完整邀请链接中的凭据", 401)
+        return 200, invite_links.information(handler, query.get("invite_id"), proof), JSON
+    if handler.path == "/ai-client.zip":
+        if handler.server.client_archive is None:
+            raise ClientError("客户端包尚未构建，请管理员检查发行包", 503)
+        return 200, handler.server.client_archive, "application/zip", (
+            ("Content-Disposition", 'attachment; filename="taskpool-ai-client.zip"'),
+        )
+    if handler.path == "/ai":
+        return round_web.ai_entry()
+    return None
+
+
+def round_write(handler, action):
+    """Round-mode writes that bypass the request journal: invitations, tokens, notices and heartbeats."""
+    service = handler.server.service
+    body = handler.request_json(round_service.MAX_SECRET_BODY)
+    with service.lock:
+        actor = handler.authenticate()
+        state = service.snapshot()["state"]
+        if state["pilot"]["format"]["maintenance"]:
+            raise ClientError("服务处于维护窗口", 503)
+        if action == "person-invite":
+            from .packages import fields
+            fields(body, "request_id role")
+            value = {"code": service.invite(actor, body["request_id"], body["role"])}
+            return 200, value, JSON
+        if action == "runner-heartbeat":
+            from .packages import fields
+            fields(body, "request_id")
+            if not round_service.execution_settings(state, actor)["heartbeat"]:
+                raise ClientError("执行端未启用心跳", 403)
+            with service.db:
+                service.notices.pulse(actor)
+            return 200, {"status": "received"}, JSON
+        if action == "token-prepare":
+            status, value = round_service.prepare_token(service, actor, body)
+            return status, value, JSON
+        if action == "notices-poll":
+            value = service.notices.poll(state, actor, body, service)
+        elif action == "notice-ack":
+            value = service.notices.acknowledge(actor, body)
+        else:
+            value = service.notices.retry(state, actor, body)
+        return 200, value, JSON
+
+
+def submit_write(handler, action):
+    """A journaled write: POST /v1/<action> with a request_id."""
+    service = handler.server.service
+    body = handler.request_json()
+    reported = handler.headers.get("X-TaskPool-Reported-At")
+    if reported:
+        try:
+            if len(reported) > 40 or datetime.fromisoformat(reported).tzinfo is None:
+                raise ValueError
+        except ValueError as error:
+            raise ClientError("客户端报告时间须为带时区的 ISO 时间") from error
+    with service.lock:
+        actor = handler.authenticate()
+        status, response = service.submit(actor, action, body["request_id"], body, reported_utc=reported,
+                                          authorize=handler.authenticate)
+        if action == "ai-invite" and response.get("invitation"):
+            response = {**response, "invitation": handler.invitation_bundle(response["invitation"])}
+            from .invite_links import remember
+            remember(service, response["invitation"]["id"])
+    return status, response, JSON
+
+
+def download_inputs(handler, target):
+    """Stream the frozen inputs of a task; credentials and the selection are checked again after packing."""
+    from .input_packages import select, generate
+    service = handler.server.service
+    query = parse_query(target.query, {'task_id','scope_version','claim_id'})
+    with service.lock:
+        actor = handler.authenticate()
+        selected = select(service,actor,service.snapshot()['state'],query)
+        version = service.credential_version(actor)
+    stream, manifest_sha = generate(service,actor,selected)
+    try:
+        with service.lock:
+            if handler.authenticate() != actor or service.credential_version(actor) != version:
+                raise ClientError('下载期间凭据已变化，请重新核对',401)
+            if select(service,actor,service.snapshot()['state'],query) != selected:
+                raise ClientError('下载期间冻结输入已变化，原文件保留',409)
+        return 200, stream, 'application/zip', (('X-TaskPool-Manifest-SHA256',manifest_sha),)
+    except BaseException:
+        stream.close()
+        raise
 
 
 def parse_query(raw, allowed):
