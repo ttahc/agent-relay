@@ -9,7 +9,7 @@ from collections import Counter
 from functools import cached_property
 import json
 
-from . import delegation, execution, input_packages, release_views, round_projects, round_service, upgrade, window_admin
+from . import delegation, execution, input_packages, release_views, round_projects, round_service, upgrade, wakeups, window_admin
 from .constants import ID
 from .packages import ClientError
 from .privacy import public, window_source
@@ -48,6 +48,9 @@ def features(r, argument):
     result.update(api_protocol=1, input_download=dict(input_packages.BUDGET))
     result.setdefault('features', {})['input-package'] = True
     result['features']['list-summary'] = True
+    if r.round_enabled:
+        result['features']['wait'] = True
+        result['wait'] = {'max_seconds': wakeups.MAX_HOLD}
     return result
 
 

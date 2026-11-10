@@ -141,9 +141,12 @@ class Service:
         return snap
 
     @contextmanager
-    def one_snapshot(self):
-        """Answer every read made while rendering one page from the same ledger snapshot."""
-        self.pinned.active, self.pinned.snap = True, None
+    def one_snapshot(self, snap=None):
+        """Answer every read made while rendering one page from the same ledger snapshot.
+
+        A caller that already holds a current snapshot passes it in so the ledger is not read again.
+        """
+        self.pinned.active, self.pinned.snap = True, snap
         try:
             yield
         finally:
