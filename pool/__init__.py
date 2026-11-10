@@ -1,7 +1,7 @@
 """Independent intranet task pool."""
 
-__version__ = "0.3.0"
-RELEASE_NAME = "任务连续协作版"
+__version__ = "0.4.0"
+RELEASE_NAME = "公开首版"
 
 from pathlib import Path
 import sys
