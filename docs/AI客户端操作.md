@@ -145,6 +145,31 @@ python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential resourc
 
 已获授权的窗口轮询 `notices-poll` 时，还可收到 `type=review-returned` 的返修提示，附对应修订、清单指纹和失败判据，且始终 `auto=false`。通知只提示先读要求，不会自动领取、恢复或启动返修。重投复用同一事件编号；新修订已交付或领取已结束后，旧退回提示不再投递。没有收到通知时仍以 `show` 中的 `delivery_reviews` 为完整读取入口。
 
+## 等待事件（wait）
+
+需要等新任务、返修、待验收交付或资源授权时，用 `wait` 代替定时查询。命令保持一个请求，服务端有新情况时立即返回；没有新情况时不产生账本读取。
+
+    python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential wait
+    python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential wait --timeout 3600
+
+`wait` 在出现新事件时返回 `status=changed`，`events` 只列出本次新出现的事件，`pending` 是当前仍待处理的事件总数，`next` 给出下一步命令提示。到 `--timeout`（默认 600 秒，最长 86400 秒）仍无新事件时返回 `status=idle`。`--timeout 0` 只查看一次。首次运行时，当时已待处理的事件会作为新事件报告一次；已报告过的事件记在本窗口凭据文件里，之后不再重复报告。
+
+| 事件 | 含义 | 接收者 |
+|---|---|---|
+| `task-ready` | 有可领取的任务 | 具备领取资格的窗口或人员 |
+| `review-returned` | 交付被退回，需要返修 | 该领取的持有者 |
+| `review-requested` | 有交付等待验收 | 任务接收者 |
+| `scope-changed` | 任务范围已变更，待确认 | 该领取的持有者 |
+| `interrupted` | 执行被标记中断，待核对 | 该领取的持有者 |
+| `cancel-requested` | 任务被请求取消 | 该领取的持有者 |
+| `resource-granted` | 申请的资源已授权（语义 5） | 提出申请的窗口 |
+
+事件只是提示，不代替任何操作：收到后仍按原流程用 `tasks`、`show`、`poll`、`execution` 读取详情，再领取、返修或验收。`wait` 不会自动领取、确认通知或启动程序。返修要求的修订、清单指纹和失败判据仍从 `poll` 或 `show` 读取。
+
+等待期间不占用凭据文件，同一窗口可以照常运行其他命令。服务升级、备份或暂时断开时，命令自行重连并继续等待；停机期间不会拖住升级。每个身份最多同时保持 2 个等待请求，服务总共 64 个，超出时回 429，可稍后再试或改用 `poll`。单个等待请求最长 50 秒，客户端自动续接。按时间才成立的变化（没有新的写入）最迟在一次续接内，也就是 50 秒内反映。
+
+对应接口为 `GET /v1/wait?cursor=<上次回执的 cursor>&timeout=<0 至 50>`，回执含 `cursor`、`changed`、`events`。不带 `cursor` 或游标已不是当前值时立即返回。服务在 `features` 中声明 `wait`；旧服务没有此声明，命令会提示改用 `poll`。`run` 自动执行循环在服务支持时同样改为等待事件，不支持时保持原来的定时查询。
+
 ## 反馈与看板
 
     python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential feedback --project demo-project --task T1001 --kind issue --title "问题标题" --details "实际观察" --impact "对工作的影响" --evidence "可复核的证据位置"
