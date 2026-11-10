@@ -63,7 +63,7 @@ def storage_boundary():
 def application(compatibility=False):
     with tempfile.TemporaryDirectory(prefix="phase1-review-", dir=ROOT / ".state") as directory:
         copy = Path(directory)
-        for name in ("build.py", "taskpool.py", "README.md", ".gitignore", "verify.py", "verify_upgrade.py"):
+        for name in ("build.py", "taskpool.py", "README.md", "LICENSE", ".gitignore", "verify.py", "verify_upgrade.py"):
             shutil.copy2(ROOT / name, copy / name)
         for folder in ("pool", "vendor", "ops", "docs"):
             shutil.copytree(ROOT / folder, copy / folder, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
