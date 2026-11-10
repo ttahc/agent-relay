@@ -180,15 +180,15 @@ def dispatch(handler, method, target, actor):
     selected = parse_query(target.query, {"window", "project"}) if method == "GET" else {}
     if method == "POST" and target.query:
         raise ClientError("请从当前助理表单提交")
-    if method=='POST' and not same_origin(handler):
-        raise ClientError('请从当前助理页面提交',403)
-    parse_error=None
+    if method == 'POST' and not same_origin(handler):
+        raise ClientError('请从当前助理页面提交', 403)
+    parse_error = None
     try:
-        posted=parse_form(handler,32768,160) if method=='POST' else None
+        posted = parse_form(handler, 32768, 160) if method == 'POST' else None
     except ClientError as error:
-        posted,parse_error=None,error
+        posted, parse_error = None, error
     with service.lock:
-        reauthenticate(handler,actor)
+        reauthenticate(handler, actor)
         snap = service.snapshot()
         state = snap["state"]
         subject = rules.identity(state, actor) or {}
@@ -201,7 +201,8 @@ def dispatch(handler, method, target, actor):
             if subject["kind"] != "human":
                 raise ClientError("AI 不能为自己授权或撤回人员委托", 403)
             try:
-                if parse_error:raise parse_error
+                if parse_error:
+                    raise parse_error
                 draft = posted
                 op = draft.pop("operation", "")
                 if op in {"grant", "grant-preview"}:

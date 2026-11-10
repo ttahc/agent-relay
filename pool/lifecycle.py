@@ -114,6 +114,7 @@ class Lifecycle:
 
 class Control:
     """Private Unix-domain control endpoint; never exposed by the HTTP listener."""
+
     def __init__(self, store, lifecycle, shutdown, backup=None):
         if os.name != "posix":
             raise ValueError("升级管理接口须在 Linux/WSL 服务内使用")

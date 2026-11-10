@@ -29,7 +29,7 @@ CLAIM_FIELDS = {
     "review": "revision manifest_sha256 checks",
     "return": "revision manifest_sha256 criterion reason",
 }
-EXECUTION_OPTIONS = ('execution_protocol','context_id','context_version')
+EXECUTION_OPTIONS = ('execution_protocol', 'context_id', 'context_version')
 
 
 def plan(service, actor, action, key, body, snap):
@@ -111,25 +111,25 @@ def register(service, actor, key, body, state, generation, admin_action):
 
 def claim(service, actor, action, body, state):
     fields(body, "request_id task_id version scope_version" +
-           ''.join(' '+k for k in ('notice',*EXECUTION_OPTIONS) if k in body))
+           ''.join(' ' + k for k in ('notice', *EXECUTION_OPTIONS) if k in body))
     if security_schema(state) >= 5 and body.get('execution_protocol') != 5:
-        raise ClientError('领取需要支持执行协议5的客户端；请更新客户端，旧领取仍可受限收尾',409)
+        raise ClientError('领取需要支持执行协议5的客户端；请更新客户端，旧领取仍可受限收尾', 409)
     task_id = string(body["task_id"], "task_id", 16)
     if task_id not in state["tasks"] or not rules.visible(state, state["tasks"][task_id], actor):
         raise ClientError("任务不存在", 404)
     if rules.enabled(state):
-        selected=None
-        if security_schema(state)>=5 and body.get('context_id'):
+        selected = None
+        if security_schema(state) >= 5 and body.get('context_id'):
             if 'context_version' not in body:
                 raise ClientError('指定配置时须同时提供配置版本')
-            selected=context_record(state,actor,{'context_id':body['context_id'],'version':body['context_version']})
-        missing, _ = rules.eligible(state, state["tasks"][task_id], actor, time.time(),execution_context=selected)
+            selected = context_record(state, actor, {'context_id': body['context_id'], 'version': body['context_version']})
+        missing, _ = rules.eligible(state, state["tasks"][task_id], actor, time.time(), execution_context=selected)
         if missing:
             raise ClientError("；".join(missing), 409)
     version = integer(body["version"], "version")
     scope = integer(body["scope_version"], "scope_version")
     payload = {"task_id": task_id}
-    payload.update({k:body[k] for k in EXECUTION_OPTIONS if k in body})
+    payload.update({k: body[k] for k in EXECUTION_OPTIONS if k in body})
     if "notice" in body:
         notice = upgrade.sha256(body["notice"])
         if not round_service.enabled(state) or not service.notices.acknowledged(actor, notice):
@@ -175,10 +175,10 @@ def claim_action(service, actor, action, key, body, state, generation):
     if round_service.enabled(state):
         name = {"deliver-files": "stop_evidence", "review": "finish", "return": "criteria"}.get(action)
         optional = f" {name}" if name and name in body else ""
-    if action=='resume':
-        optional+=''.join(' '+k for k in EXECUTION_OPTIONS if k in body)
-        if security_schema(state)>=5 and body.get('execution_protocol')!=5:
-            raise ClientError('继续任务需要执行协议5；旧回合事实和已有产物保留',409)
+    if action == 'resume':
+        optional += ''.join(' ' + k for k in EXECUTION_OPTIONS if k in body)
+        if security_schema(state) >= 5 and body.get('execution_protocol') != 5:
+            raise ClientError('继续任务需要执行协议5；旧回合事实和已有产物保留', 409)
     fields(body, "request_id claim_id " + suffix + optional)
     cid = string(body["claim_id"], "claim_id", 100)
     held = state["claims"].get(cid)
@@ -233,21 +233,21 @@ def delivery(service, actor, action, key, body, held, expects):
 
 def resume(actor, body, state, held, scope, generation, expects):
     cid, task = held["claim_id"], state["tasks"][held["task_id"]]
-    extra_resume={k:body[k] for k in EXECUTION_OPTIONS if k in body}
-    extra_resume['scope_version']=scope
+    extra_resume = {k: body[k] for k in EXECUTION_OPTIONS if k in body}
+    extra_resume['scope_version'] = scope
     if rules.contract(task) and held["E"] == {"state": "stopped", "reason": "pause"}:
         instructions = []
         if held["scope_ack_pending"]:
             instructions.append(step(actor, "ack_scope", {"claim_id": cid}, expects))
         instructions.append(step(COORDINATOR, "resume",
-                                 {"claim_id": cid, "authority_ref": "bootstrap", "baseline": task["inputs"],**extra_resume},
+                                 {"claim_id": cid, "authority_ref": "bootstrap", "baseline": task["inputs"], **extra_resume},
                                  {**generation, **expects}))
         return instructions
     if held["W"]["state"] != "revision" or held["E"] != {"state": "stopped", "reason": "complete"}:
         raise ClientError("开始返修前须完成上一次执行的实际停止", 409)
     previous = held["deliveries"][held["W"]["revision"]]["manifest"]
     baseline = {**held["inputs"], previous["path"]: previous["sha256"]}
-    return [step(actor, "acquire", {"claim_id": cid, "baseline": baseline,**extra_resume}, expects)]
+    return [step(actor, "acquire", {"claim_id": cid, "baseline": baseline, **extra_resume}, expects)]
 
 
 def withdraw(actor, body, state, held, expects):

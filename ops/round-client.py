@@ -172,6 +172,7 @@ class Pool:
         probe.check_hostname = False
         probe.verify_mode = ssl.CERT_NONE
         probe.minimum_version = ssl.TLSVersion.TLSv1_2
+
         def certificate_probe():
             with socket.create_connection((self.connect_host, self.port), timeout=8) as tcp:
                 with probe.wrap_socket(tcp, server_hostname=self.host) as connection:
@@ -439,12 +440,12 @@ def durable_write(state, api, operation=None, route=None, prepare=None, local_up
     """Persist the exact request, including file bytes, before any business write."""
     data = state.data
     pending = data.get("pending_write")
-    if pending and getattr(state,'supersedes_request_id',None)==pending['body']['request_id']:
-        archive=data.setdefault('superseded_writes',{})
-        archive.setdefault(pending['body']['request_id'],deepcopy(pending))
+    if pending and getattr(state, 'supersedes_request_id', None) == pending['body']['request_id']:
+        archive = data.setdefault('superseded_writes', {})
+        archive.setdefault(pending['body']['request_id'], deepcopy(pending))
         data.pop('pending_write')
         state.save()
-        pending=None
+        pending = None
     if pending:
         if operation is not None and pending["operation"] != operation:
             raise ValueError("此窗口有待确认写入，请先运行 pending 查看，再用 retry 重试原请求")
@@ -452,8 +453,8 @@ def durable_write(state, api, operation=None, route=None, prepare=None, local_up
         if operation is None:
             raise ValueError("此窗口没有待确认写入")
         body = prepare()
-        if getattr(state,'supersedes_request_id',None) and 'supersedes_request_id' not in body:
-            body['supersedes_request_id']=state.supersedes_request_id
+        if getattr(state, 'supersedes_request_id', None) and 'supersedes_request_id' not in body:
+            body['supersedes_request_id'] = state.supersedes_request_id
         body["request_id"] = "write-" + secrets.token_hex(16)
         pending = {"operation": operation, "route": route, "body": body, "local_update": local_update or {}}
         data["pending_write"] = pending
@@ -553,6 +554,7 @@ def rename(state, api, name):
     if not isinstance(name, str) or not name.strip():
         raise ValueError("窗口名称不能为空")
     local_update = {}
+
     def prepare():
         binding = api.call("identity", state.data["token"])["binding"]
         body = {key: binding[key] for key in ("session", "model", "environment")}
@@ -634,6 +636,7 @@ def sync(state, args):
                                      model=args.model, environment=args.environment, reasoning=None, tools_version=None,
                                      permissions_version=None, make_default=True, supersedes_request_id=None)
         return execution_command(state, api, options)
+
     def prepare():
         binding = api.call("identity", state.data["token"])["binding"]
         body = {"session": binding["session"], "model": args.model or binding["model"],
@@ -710,6 +713,7 @@ def visible_tasks(state, api, args):
 def request_capability(state, api, args):
     parameters = {key: getattr(args, key) for key in ("project", "capability", "kind", "value", "environment",
                                                      "evidence", "evidence_sha256", "days")}
+
     def prepare():
         if not re.fullmatch(r"[a-fA-F0-9]{64}", args.evidence_sha256):
             raise ValueError("核实申请须提供实际证据文件的 SHA256（64 位十六进制）")
@@ -725,6 +729,7 @@ def request_capability(state, api, args):
 
 def resolve_capability(state, api, args):
     parameters = {key: getattr(args, key) for key in ("verification_id", "decision", "level", "reason")}
+
     def prepare():
         rows = api.call("capability-requests", state.data["token"])
         row = next((row for row in rows if row["id"] == args.verification_id), None)
@@ -810,6 +815,7 @@ def update_feedback(state, api, args):
             metrics = json.loads(args.metrics.read_text(encoding="utf-8-sig"))
             if not isinstance(metrics, list):
                 raise ValueError("指标文件须为 JSON 数组")
+
         def chosen(name, default=""):
             provided = getattr(args, name)
             return provided if provided is not None else latest.get(name, current.get(name, default)) or default
@@ -990,6 +996,7 @@ def validate_input_zip(stream, binding, refs, limits):
         header_sha = getattr(stream, "manifest_sha256", None)
         if header_sha is not None and (not isinstance(header_sha, str) or not re.fullmatch(r"[A-Fa-f0-9]{64}", header_sha) or header_sha.lower() != checksum):
             raise ValueError("输入包清单与响应摘要不一致，未降级下载")
+
         def unique_object(pairs):
             result = {}
             for key, value in pairs:
@@ -1201,9 +1208,9 @@ def stop_or_handoff(state, api, args):
 
 def resume_task(state, api, args):
     def prepare():
-        body=own_claim(state,api,args.task,args.claim_id)
-        if server_features(api,state.data['token'])['security_schema']>=5:
-            body['execution_protocol']=5
+        body = own_claim(state, api, args.task, args.claim_id)
+        if server_features(api, state.data['token'])['security_schema'] >= 5:
+            body['execution_protocol'] = 5
         return body
     return durable_write(state, api, operation_key("resume", {"task": args.task, "claim_id": args.claim_id}),
                          "resume", prepare)
@@ -1281,6 +1288,7 @@ def execution_command(state, api, args):
                               action_id=getattr(args, "action_id", None))
     require_feature(api, state.data["token"], route)
     parameters = {key: value for key, value in vars(args).items() if key not in {"state", "allow_loopback"}}
+
     def prepare():
         if route == "context-save":
             view = execution_view(state, api)
@@ -1373,6 +1381,7 @@ def execution_command(state, api, args):
 
 def feedback(state, api, args):
     parameters = {key: getattr(args, key) for key in ("project", "task", "kind", "title", "details", "impact", "evidence", "visibility")}
+
     def prepare():
         return {"project_id": args.project, "task_id": args.task or "", "kind": args.kind, "title": args.title,
                 "details": args.details, "impact": args.impact, "evidence": args.evidence or "", "visibility": args.visibility,
@@ -1734,6 +1743,7 @@ def configure_runner(state, api, args):
                     Path(command[0]).suffix.lower() in (".bat", ".cmd") or not args.workdir.is_dir()):
         raise ValueError("本机入口须为绝对路径的可执行文件及已存在的工作目录")
     parameters = {"command": command, "workdir": str(args.workdir.resolve()), "limit": args.limit, "heartbeat": args.heartbeat}
+
     def prepare_configuration():
         settings = api.call("runner", token)["settings"]
         return {"version": settings.get("version", 0), "limit": args.limit, "auto": bool(command),
@@ -1804,7 +1814,7 @@ def main():
     state = None
     try:
         state = State(args.state)
-        state.supersedes_request_id=getattr(args,'supersedes_request_id',None)
+        state.supersedes_request_id = getattr(args, 'supersedes_request_id', None)
         with state.exclusive():
             value = run_command(state, args)
             print(value if isinstance(value, str) else json.dumps(public_value(value), ensure_ascii=False, indent=2), flush=True)

@@ -438,6 +438,7 @@ SORTS = {"id": lambda t: t["created_seq"], "title": lambda t: t["title"], "statu
 def list_page(actor, data, filters, activity):
     key = filters.get("sort", "id")
     tasks = sorted((t for t in data["tasks"] if matches(t, actor, filters)), key=SORTS.get(key, SORTS["id"]))
+
     def header(name, title):
         query = {k: v for k, v in filters.items() if k != "sort"} | {"sort": name}
         return f'<th><a href="/list?{e(urlencode(query), quote=True)}">{title}{" ↓" if key == name else ""}</a></th>'
@@ -742,7 +743,6 @@ def sheet(actor, view, brief, events):
 
 def detail(actor, view, brief, events):
     return pages.workspace(actor, f'<section class="wb-page">{sheet(actor, view, brief, events)}</section>')
-
 
 
 def new_task(actor, projects, project, receivers, capabilities, members, tasks):

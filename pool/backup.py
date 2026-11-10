@@ -157,7 +157,7 @@ def snapshot(store, archive, tag, seed=False, *, service=None):
             tls_paths, tls_status = tls_sources(store)
         for path in sorted(store.rglob("*")):
             relative = path.relative_to(store).as_posix()
-            if path.relative_to(store).parts[0]=='.runtime':
+            if path.relative_to(store).parts[0] == '.runtime':
                 continue
             if path.is_symlink():
                 raise ValueError("服务目录包含符号链接，停止备份")
@@ -198,9 +198,9 @@ def snapshot(store, archive, tag, seed=False, *, service=None):
             content = {"format": 1, "created_at": datetime.now(timezone.utc).isoformat(), "tag": tag,
                        "ledger_head": before["head"], "ledger_sha256": before.get("sha256"),
                        "files": rows, "service_files": service_files, "tls_backup": tls_status,
-                       'configuration_backup': {'status':'complete' if 'service-config.json' in rows else 'absent',
-                                                'file':'service-config.json',
-                                                'sha256':rows.get('service-config.json',{}).get('sha256')},
+                       'configuration_backup': {'status': 'complete' if 'service-config.json' in rows else 'absent',
+                                                'file': 'service-config.json',
+                                                'sha256': rows.get('service-config.json', {}).get('sha256')},
                        "service_restore": {"scope": "current-store-sibling-tls", "store_name": "local",
                                            "allowed_files": list(TLS_ALLOWLIST), "help": RESTORE_HELP},
                        "restore_policy": "manual-only; never overwrite writes after upgrade"}

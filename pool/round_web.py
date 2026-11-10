@@ -308,8 +308,7 @@ def reset_issue(handler, method, actor, target):
         if method == "GET":
             from .httpd import parse_query
             name = parse_query(target.query, {"identity"}).get("identity", "")
-            return page("人员密码恢复", "核对人员身份后签发 15 分钟有效的重置凭据。", body=
-                        password_form("/accounts/reset", identity_input(value=name), "生成重置凭据"), actor=actor)
+            return page("人员密码恢复", "核对人员身份后签发 15 分钟有效的重置凭据。", body=password_form("/accounts/reset", identity_input(value=name), "生成重置凭据"), actor=actor)
         fields(data, "request_id identity")
         name = identifier(data["identity"], "人员账号")
         status, value = service.submit(actor, "password-event", data["request_id"],
@@ -319,8 +318,7 @@ def reset_issue(handler, method, actor, target):
         if status != 200:
             return page("人员密码恢复", value.get("message") or (value.get("steps") or [{}])[-1].get("reason", "请求待确认"), status, actor=actor)
         code = service.passwords.reset_reply(digest(encoded([actor, data["request_id"]])), name)
-        return page("人员密码恢复", "请将重置凭据交给已核对的人员。", body=
-                    f'<code class="credential">{escape(code)}</code><p><a href="/password/reset">重置入口</a></p>', actor=actor)
+        return page("人员密码恢复", "请将重置凭据交给已核对的人员。", body=f'<code class="credential">{escape(code)}</code><p><a href="/password/reset">重置入口</a></p>', actor=actor)
 
 
 def invitations(handler, method, actor, target=None):
@@ -330,6 +328,7 @@ def invitations(handler, method, actor, target=None):
     from . import invite_links
     issued = ""
     attempted, message, status = {}, "", 200
+
     def present(record):
         bundle = {k: record[k] for k in ("id", "code", "url", "certificate_sha256", "protocol", "connect_host",
                   "kind", "client", "instructions", "invitation_url") if k in record}
@@ -436,8 +435,7 @@ def token_rotation(handler, method, actor, target):
             if not round_service.rotation_allowed(state, actor, name):
                 raise ClientError("无凭据轮换权限", 403)
             version = rules.identity(state, name)["credential"]
-        return page("轮换窗口令牌", "新令牌激活后，原令牌失效。窗口编号保留。", body=
-                    password_form("/tokens/rotate", task_pages.hidden("name", name) + task_pages.hidden("version", version)
+        return page("轮换窗口令牌", "新令牌激活后，原令牌失效。窗口编号保留。", body=password_form("/tokens/rotate", task_pages.hidden("name", name) + task_pages.hidden("version", version)
                                   + task_pages.hidden("recovery", secrets.token_urlsafe(32)) +
                                   upgrade_pages.input_field("reason", "轮换依据"), "签发待激活令牌"), actor=actor)
     data = parse_form(handler, 8192, 5)
@@ -452,8 +450,7 @@ def token_rotation(handler, method, actor, target):
     if status != 200 or "token" not in value:
         return page("轮换窗口令牌", value.get("message") or (value.get("steps") or [{}])[-1].get("reason", "无可领取的新令牌"), status, actor=actor)
     bundle = handler.invitation_bundle({k: value[k] for k in ("registration_id", "executor_id", "window", "token", "deadline")})
-    return page("待激活令牌", "将信息交给对应窗口，用 round-client.py activate 激活。", body=
-                f'<textarea readonly rows="8" aria-label="待激活令牌">{escape(json.dumps(bundle, indent=2))}</textarea>', actor=actor)
+    return page("待激活令牌", "将信息交给对应窗口，用 round-client.py activate 激活。", body=f'<textarea readonly rows="8" aria-label="待激活令牌">{escape(json.dumps(bundle, indent=2))}</textarea>', actor=actor)
 
 
 def route(handler, method, target, current, actor):
@@ -468,17 +465,19 @@ def route(handler, method, target, current, actor):
         return password_route(handler, method, path, current, actor)
     if path in PATHS and not actor:
         return redirect("/login")
-    if path=='/workspace-state':
-        if method!='GET':raise ClientError('状态摘要仅支持查看',405)
+    if path == '/workspace-state':
+        if method != 'GET':
+            raise ClientError('状态摘要仅支持查看', 405)
         from .httpd import parse_query
         from . import __version__
-        project=parse_query(target.query,{'project'}).get('project') or None
-        data=handler.server.service.read(actor,'overview',project)
-        return 200,{'revision':workbench.workspace_revision(data),'version':__version__},'application/json; charset=utf-8'
+        project = parse_query(target.query, {'project'}).get('project') or None
+        data = handler.server.service.read(actor, 'overview', project)
+        return 200, {'revision': workbench.workspace_revision(data), 'version': __version__}, 'application/json; charset=utf-8'
     if path == '/release-status':
         from .release_pages import page as release_page
-        if method!='GET':raise ClientError('版本复验页仅支持查看',405)
-        return release_page(handler.server.service,actor)
+        if method != 'GET':
+            raise ClientError('版本复验页仅支持查看', 405)
+        return release_page(handler.server.service, actor)
     if path == "/accounts/reset":
         return reset_issue(handler, method, actor, target)
     if path == "/accounts/projects":

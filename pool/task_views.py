@@ -69,12 +69,12 @@ def task_view(service, state, task, actor):
     project = rules.project_record(state, spec["project_id"]) if spec else None
     return {"task": {**task, "project_name": project["name"]} if project else task,
             "stage": stage(task, active_claim(state, task), state),
-            'execution_status':execution_status(state,active_claim(state,task)),
+            'execution_status': execution_status(state, active_claim(state, task)),
             "claims": deepcopy(permitted),
-            'execution_protocol':5 if security_schema(state)==5 else None,
-            'default_context':state.get('security',{}).get('execution',{}).get('defaults',{}).get(actor),
-            'execution_contexts':[deepcopy(row) for row in state.get('security',{}).get('execution',{}).get('contexts',{}).values()
-                                  if row.get('executor_id')==actor],
+            'execution_protocol': 5 if security_schema(state) == 5 else None,
+            'default_context': state.get('security', {}).get('execution', {}).get('defaults', {}).get(actor),
+            'execution_contexts': [deepcopy(row) for row in state.get('security', {}).get('execution', {}).get('contexts', {}).values()
+                                  if row.get('executor_id') == actor],
             "delivery_reviews": service._delivery_reviews(state, task, [c for c in permitted if
                 actor in {c["origin"], task["receiver"]} or service.is_admin(actor) or rules.system_admin(state, actor)]),
             "handoffs": service.handoffs(state, task) if any(c["origin"] == actor and c["L"] == "active"
@@ -165,7 +165,7 @@ def feedback_due(service, state, actor, project=None):
 
 
 def task_summary(task):
-    result={k:task[k] for k in ('task_id','title','status','stage','version','scope_version','priority',
-                'project_name','qualification','holder','holder_window','holder_window_name','receiver') if k in task}
-    result['project_id']=rules.task_project(task)
+    result = {k: task[k] for k in ('task_id', 'title', 'status', 'stage', 'version', 'scope_version', 'priority',
+                'project_name', 'qualification', 'holder', 'holder_window', 'holder_window_name', 'receiver') if k in task}
+    result['project_id'] = rules.task_project(task)
     return result

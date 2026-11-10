@@ -61,14 +61,14 @@ def decide(state, env, context):
     payload = env["payload"]
     audit = payload.get("_audit") or {}
     from 协作执行 import OPS as EXECUTION_OPS, action as execution_action
-    if env['command']=='pilot' and payload.get('op') in EXECUTION_OPS:
-        execution_action(state,env,context)
+    if env['command'] == 'pilot' and payload.get('op') in EXECUTION_OPS:
+        execution_action(state, env, context)
         return state, {}
     if env['command'] == 'pilot' and payload.get('op') == 'security-migrate':
         from 协作安全 import migrate
         rules.require(audit.get('operation') == 'security-migrate', '安全迁移缺受控操作依据')
         migrate(state, audit.get('actor'), payload.get('target'), env['event_id'], context.get('now', time.time()),
-                {'head':payload.get('source_head'),'sha256':payload.get('source_sha256')})
+                {'head': payload.get('source_head'), 'sha256': payload.get('source_sha256')})
         return state, {}
     delegation.enforce_audit(state, env, context.get("now", time.time()))
     task_id, project = delegation.target(state, audit.get("operation"), payload)
@@ -146,7 +146,7 @@ def plan(service, actor, action, key, body, snap):
         if actor != ADMIN or body['target'] not in (4, 5):
             raise ClientError('须由本机管理员按 4／5 顺序迁移安全语义', 403)
         return {'steps': [step(COORDINATOR, 'pilot', {'op': action, 'target': body['target'],
-                         'source_head':snap['head'],'source_sha256':snap.get('sha256')}, expects)]}
+                         'source_head': snap['head'], 'source_sha256': snap.get('sha256')}, expects)]}
     if action == "upgrade-migrate":
         return migrate(actor, body, expects)
     if not rules.enabled(state):
@@ -308,7 +308,7 @@ def credential_change(op):
 def capability_save(op):
     body, state, actor = op.body, op.state, op.actor
     fields(body, "request_id project_id name capability kind value level evidence environment expires version" +
-           ''.join(' '+k for k in ('context_dimensions','context_id','context_version') if k in body))
+           ''.join(' ' + k for k in ('context_dimensions', 'context_id', 'context_version') if k in body))
     project = identifier(body["project_id"], "项目编号")
     if not rules.roles(state, project, actor) & rules.ROLES:
         raise ClientError("当前项目角色只能查看能力记录", 403)
@@ -323,25 +323,25 @@ def capability_save(op):
     fields(evidence, "note sha256")
     evidence = {"note": string(evidence["note"], "证据说明"), "sha256": evidence["sha256"]}
     if body["level"] in {"verified", "probed"}:
-        if security_schema(state)>=5 and (rules.identity(state,actor) or {}).get('kind')!='human':
-            raise ClientError('探测或核实等级须由有项目授权的人类办理；AI不能借旧接口相互核实',403)
+        if security_schema(state) >= 5 and (rules.identity(state, actor) or {}).get('kind') != 'human':
+            raise ClientError('探测或核实等级须由有项目授权的人类办理；AI不能借旧接口相互核实', 403)
         sha256(evidence["sha256"])
     elif evidence["sha256"]:
         sha256(evidence["sha256"])
     elif evidence["sha256"] != "":
         raise ClientError("证据指纹格式无效")
     environment = string(body["environment"], "环境标识", 160)
-    if security_schema(state)<5 and body["kind"] == "environment" and environment != (rules.identity(state, name) or {}).get("environment", "human"):
+    if security_schema(state) < 5 and body["kind"] == "environment" and environment != (rules.identity(state, name) or {}).get("environment", "human"):
         raise ClientError("证据与执行端登记的环境不一致")
     payload = {"op": "capability", "project_id": project,
                "name": name, "id": capability, "version": version(body["version"]), "record": {
                    "kind": body["kind"], "value": string(body["value"], "能力值", 100).strip(), "level": body["level"],
                    "evidence": evidence, "environment": environment, "expires": body["expires"],
                }}
-    if security_schema(state)>=5:
-        selected=context_record(state,name,{'context_id':body['context_id'],'version':body['context_version']}) if body.get('context_id') else None
-        payload['record'].update(bind_evidence(state,name,payload['record'],selected,project,capability,
-            body.get('context_dimensions'),body['level'] in {'verified','probed'}))
+    if security_schema(state) >= 5:
+        selected = context_record(state, name, {'context_id': body['context_id'], 'version': body['context_version']}) if body.get('context_id') else None
+        payload['record'].update(bind_evidence(state, name, payload['record'], selected, project, capability,
+            body.get('context_dimensions'), body['level'] in {'verified', 'probed'}))
     return payload
 
 

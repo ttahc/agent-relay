@@ -125,11 +125,12 @@ def render(actor, project, data, versions, projects):
         controls = ""
         if data["managed"] and record["status"] == "pending":
             ids = record["sources"] + record["targets"]
-            controls = ui.block("核对停止与生效", operation(project, "change-finish", "提交处置", 
+            controls = ui.block("核对停止与生效", operation(project, "change-finish", "提交处置",
                                 ui.json_field("versions", "当前任务版本", {tid: versions[tid] for tid in ids})
                                 + ui.selection("outcome", "结果", [("apply", "正式承接"), ("abort", "撤回变更")])
                                 + ui.text_field("reason", "实际停止及处置依据"), {"id": record["id"]}))
         changes.append(f'<li>{escape(record["id"])} · {escape(record["status"])} · {escape(record["reason"])}{controls}</li>')
+
     def tab(key, name):
         href = "/collaboration" + ("?" + urlencode({"project": key}) if key else "")
         return f'<a href="{escape(href, quote=True)}"{' aria-current="page"' if (key or None) == project else ""}>{escape(name)}</a>'

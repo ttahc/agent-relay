@@ -47,15 +47,16 @@ def reviewers(state, project, name):
                   set(rules.grant(state, project, key.removeprefix("identity:"))["roles"]) & {"manager", "receiver"})
 
 
-def _execution_occupancies(state,name):
-    if security_schema(state)<5:
+def _execution_occupancies(state, name):
+    if security_schema(state) < 5:
         return []
     from 协作执行 import blocking_records
-    claims={key for key,row in state.get('claims',{}).items() if row.get('origin')==name}
-    data=state['security'].get('execution',{})
-    return [row for row in blocking_records(state) if row.get('claim_id') in claims]+[
-        row for row in data.get('actions',{}).values() if row.get('executor_id')==name and
-        row.get('state') in {'start-authorized','running','unconfirmed'}]
+    claims = {key for key, row in state.get('claims', {}).items() if row.get('origin') == name}
+    data = state['security'].get('execution', {})
+    return [row for row in blocking_records(state) if row.get('claim_id') in claims] + [
+        row for row in data.get('actions', {}).values() if row.get('executor_id') == name and
+        row.get('state') in {'start-authorized', 'running', 'unconfirmed'}]
+
 
 def view(state, actor, name):
     if not allowed(state, actor, name):
@@ -71,8 +72,8 @@ def view(state, actor, name):
     return {"executor_id": name, "window": subject.get("window"), "window_name": subject.get("window_name"),
             "owner": subject["owner"], "status": subject["status"], "version": subject["credential"],
             "claims": claims, "grants": grants, "delegations": delegations,
-            "execution_occupancies":len(_execution_occupancies(state,name)),
-            "transfer_allowed": not claims and not _execution_occupancies(state,name),
+            "execution_occupancies": len(_execution_occupancies(state, name)),
+            "transfer_allowed": not claims and not _execution_occupancies(state, name),
             "consequence": "处置不会证明外部程序已停止，不释放领取或资源；实际停止、交接与验收须另行办理。"}
 
 
@@ -111,7 +112,7 @@ def payload(state, actor, action, body, key):
 def plan(service, actor, action, key, body, state):
     if action not in ACTIONS:
         return None
-    if state["pilot"].get("format", {}).get("schema") not in {3,4,5}:
+    if state["pilot"].get("format", {}).get("schema") not in {3, 4, 5}:
         raise ClientError("须先迁移窗口数据合同", 409)
     p = payload(state, actor, action, body, key)
     candidate = deepcopy(state)
@@ -144,7 +145,7 @@ def apply(state, p, actor, now, event_id):
                       "须选择另一位有效人员作为新责任人")
         rules.require(not any(c["origin"] == name and (c["L"] == "active" or c.get("R")) for c in state["claims"].values()),
                       "窗口仍有活动领取、待验交付或资源占用；先完成停止、交接或验收再更换责任人")
-        rules.require(not _execution_occupancies(state,name),
+        rules.require(not _execution_occupancies(state, name),
                       '窗口还有未收口动作或物理占用；结束领取不代替实际收尾，暂不能更换责任人')
         previous_owner = subject["owner"]
         subject["owner"] = p["owner"]

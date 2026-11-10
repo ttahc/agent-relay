@@ -159,6 +159,7 @@ def plan(service, actor, action, key, body, state):
         operation["file"] = file
     data = candidate["security"]["execution"]
     result = {"execution_protocol": 5, "operation": action}
+
     def public_record(record):
         # Stable deterministic result fields only; actual ledger event/time come from GET execution.
         return _public({name: value for name, value in record.items() if name not in {"event", "at"}})
@@ -222,6 +223,7 @@ def read(state, actor, query=None):
     can_profile = actor == target or rules.system_admin(state, actor) or actor == rules.responsible(state, target)
     contexts = [deepcopy(row) for row in data.get("contexts", {}).values() if row["executor_id"] == target and can_profile]
     selected_action = data.get("actions", {}).get(query.get("action_id"), {})
+
     def selected(row):
         return _can_view(state, actor, row) and (not query.get("executor_id") or row.get("executor_id") == target) and all(
             not query.get(key) or row.get(key if key != "action_id" else "action_id", row.get("id") if key == "action_id" else None) == query[key] or

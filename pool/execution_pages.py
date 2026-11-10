@@ -31,7 +31,8 @@ def resource_text(resources):
 
 
 def config_form(row=None):
-    row = row or {}; config = row.get("config", {})
+    row = row or {}
+    config = row.get("config", {})
     fields = fixed({"context_id": row.get("context_id"), "version": row.get("version", 0)})
     for key, title in DIMENSIONS:
         value = config.get(key, "manual" if key == "adapter" else "unknown")
@@ -76,7 +77,8 @@ def render(actor, name, data, features, tasks, claims, domains):
         body += ui.block("新建可选配置", config_form())
     latest = {}
     for row in contexts:
-        if row["version"] > latest.get(row["context_id"], {}).get("version", -1): latest[row["context_id"]] = row
+        if row["version"] > latest.get(row["context_id"], {}).get("version", -1):
+            latest[row["context_id"]] = row
     for row in contexts:
         config = row["config"]
         chosen = default.get("context_id") == row["context_id"] and default.get("version") == row["version"]
@@ -85,7 +87,8 @@ def render(actor, name, data, features, tasks, claims, domains):
         if enabled and row.get("can_write") and latest[row["context_id"]]["version"] == row["version"]:
             body += ui.block("基于此配置创建新版本", config_form(row))
         body += '</article>'
-    if not contexts: body += '<p>暂无执行配置。</p>'
+    if not contexts:
+        body += '<p>暂无执行配置。</p>'
     body += '</section><section class="box"><h3>执行段（固定领取、范围和配置版本）</h3>'
     choices = [(row["context_id"] + ":" + str(row["version"]), f'{row["config"].get("model", "未知")} · v{row["version"]} · {row["context_id"]}') for row in contexts]
     if enabled and own and choices:
@@ -132,7 +135,8 @@ def render(actor, name, data, features, tasks, claims, domains):
     body += '</section><section class="box"><h3>实际占用、旧领取与 unknown 阻挡</h3>'
     for row in [*data.get("grants", []), *data.get("legacy", []), *data.get("blockers", []), *data.get("physical_blockers", [])]:
         body += f'<p>{e(str(row.get("task_id") or row.get("claim_id") or row["id"]))} · {e(STATES.get(row.get("physical"), str(row.get("physical") or "待核")))} · {e(resource_text(row.get("resources", [])))}</p>'
-        if row.get("binding_notice"): body += f'<p class="muted-text">{e(row["binding_notice"])}</p>'
+        if row.get("binding_notice"):
+            body += f'<p class="muted-text">{e(row["binding_notice"])}</p>'
         if row.get("can_report") and row.get("claim_id"):
             body += ui.block("登记原领取的真实收尾事实", fact_form(row))
     body += '</section><p>事实记录与材料暂存不自动构成交付接受或验收通过。外部程序自动结束检测及自动解除占用尚未支持。</p>'
@@ -143,8 +147,10 @@ def _body(action, values):
     data = dict(values)
     for key in ("version", "scope_version", "epoch", "generation"):
         if key in data:
-            try: data[key] = int(data[key])
-            except (ValueError, TypeError) as error: raise ClientError("页面记录版本无效，请重新读取后修正") from error
+            try:
+                data[key] = int(data[key])
+            except (ValueError, TypeError) as error:
+                raise ClientError("页面记录版本无效，请重新读取后修正") from error
     if action == "context-save":
         config = {key: data.pop(key) for key, _ in DIMENSIONS}
         config["sources"] = {key: data.pop("source-" + key) for key, _ in DIMENSIONS}
@@ -153,14 +159,16 @@ def _body(action, values):
         try:
             context, version = data.pop("context_ref").rsplit(":", 1)
             data.update(context_id=context, context_version=int(version))
-        except (ValueError, KeyError) as error: raise ClientError("请选择本段使用的合法配置版本") from error
+        except (ValueError, KeyError) as error:
+            raise ClientError("请选择本段使用的合法配置版本") from error
     elif action == "action-prepare":
         resources = []
         for key in sorted(list(data)):
             if key.startswith("pick-"):
                 row = strict_json(data.pop(key).encode())
                 resources.append({**row, "domain": data["domain"]})
-        data.pop("domain"); data["resources"] = resources
+        data.pop("domain")
+        data["resources"] = resources
     elif action == "resource-request":
         data["resources"] = strict_json(data["resources"].encode())
     elif action in {"execution-fact", "resource-release"}:
@@ -182,7 +190,8 @@ def body(action, values):
 
 
 def dispatch(handler, method, target, actor):
-    if method != "GET": raise ClientError("此页仅供读取，写入请使用对应操作表单", 405)
+    if method != "GET":
+        raise ClientError("此页仅供读取，写入请使用对应操作表单", 405)
     name = PATH.fullmatch(target.path)[1]
     service = handler.server.service
     data = service.read(actor, "execution", {"executor_id": name})

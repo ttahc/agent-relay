@@ -154,7 +154,7 @@ def plan(service, actor, action, key, body, state):
     if action not in ACTIONS:
         return None
     from .upgrade import identifier, version
-    if state["pilot"].get("format", {}).get("schema") not in {3,4,5}:
+    if state["pilot"].get("format", {}).get("schema") not in {3, 4, 5}:
         raise ClientError("须先迁移人员与 AI 委托数据合同", 409)
     subject = rules.identity(state, actor) or {}
     if subject.get("kind") != "human" or not rules.active(state, actor):

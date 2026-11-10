@@ -305,6 +305,7 @@ def password_change(service, actor, name, kind, request, protected, reset_sha=No
 
 class Notices:
     """Persistent delivery attempts for ready tasks and exact returned revisions."""
+
     def __init__(self, db):
         self.db = db
         db.executescript("""
