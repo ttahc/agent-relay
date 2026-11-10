@@ -17,6 +17,7 @@ from .packages import (ClientError, MAX_PACKAGE, SHA, artifact_name, fields, int
                        make_delivery, reference, seal_metadata, string, unpack_delivery)
 from .storage import LedgerBackend
 from .lifecycle import Lifecycle
+from .task_state import active_claim, execution_status, handoff_reference, security_schema, stage
 from 协作账本 import cursor, envelope
 from 协作交接 import import_package
 from 协作存储 import digest, encoded, publish, safe
@@ -61,60 +62,6 @@ def store_once(store, path, raw):
     if not publish(target, raw) and target.read_bytes() != raw:
         raise Unavailable("不可变文件内容冲突")
     return target
-
-
-def handoff_reference(claim):
-    path = claim.get("replacement", "")
-    name = path.rsplit("/", 1)[-1]
-    if path.startswith("handoffs/" + claim["claim_id"] + "/") and name.endswith(".json") and SHA.fullmatch(name[:-5]):
-        return {"path": path, "sha256": name[:-5]}
-    return None
-
-
-def active_claim(state, task):
-    return next((state["claims"][cid] for cid in reversed(task["claims"])
-                 if state["claims"][cid]["L"] == "active"), None)
-
-
-def execution_status(state, claim):
-    if not state or not claim or state.get('security',{}).get('schema',0)<5:
-        return None
-    data=state['security'].get('execution',{})
-    all_rows=[row for row in data.get('actions',{}).values() if row.get('claim_id')==claim['claim_id']]
-    rows=[row for row in all_rows if row.get('epoch')==claim['epoch'] and row.get('scope_version')==claim['W']['scope']]
-    historical=[row for row in all_rows if row not in rows]
-    if not all_rows and claim['claim_id'] not in data.get('claim_bindings',{}):
-        return None
-    unknown=sum(row.get('state')=='unconfirmed' or row.get('state') in {'finished','error','stopped'} and
-                data.get('grants',{}).get(row.get('grant_id'),{}).get('physical') in {'in-use','unknown'} for row in rows)
-    return {'actions':len(rows),'running':sum(row['state']=='running' for row in rows),
-            'awaiting_start':sum(row['state']=='start-authorized' for row in rows),
-            'unconfirmed':unknown,'finished':sum(row['state'] in {'finished','error','stopped','not-started'} for row in rows),
-            'historical_live':sum(row['state'] in {'running','start-authorized','unconfirmed'} for row in historical),
-            'historical_unconfirmed':sum(row['state']=='unconfirmed' or data.get('grants',{}).get(row.get('grant_id'),{}).get('physical') in {'in-use','unknown'} for row in historical)}
-
-def stage(task, claim, state=None):
-    if claim and claim.get("recovery", {}).get("status") == "pending":
-        return "recovery"
-    if task["status"] == "running" and claim:
-        if task.get("cancel_requested"):
-            return "cancel_pending"
-        if claim["E"].get("reason") == "replace":
-            return "handoff_pending"
-        if claim["E"].get("reason") == "pause" and claim["W"]["state"] in {"draft", "revision"}:
-            return "paused"
-        current=execution_status(state,claim)
-        if current is not None and claim['W']['state'] not in {'review','revision','complete'}:
-            if current['unconfirmed']:return 'recovery'
-            if current['running'] or current['finished']:return 'running'
-            return 'claimed'
-        return {"review": "review", "revision": "revision", "complete": "accepted"}.get(
-            claim["W"]["state"], "claimed" if claim.get("run", {}).get("state") == "claimed" else "running")
-    if task["status"] == "available" and (spec := rules.contract(task)):
-        gate = spec.get("gate")
-        if not spec["open"] or state is not None and gate and state["pilot"].get("release:" + gate, {}).get("status") != "closed":
-            return "waiting"
-    return task["status"]
 
 
 class Service:
@@ -320,7 +267,7 @@ class Service:
         if body.get('supersedes_request_id'):
             details['supersedes_request_id'] = body['supersedes_request_id']
         details.update(delegation.stamp(state, actor, project))
-        if state.get('security',{}).get('schema',0)>=5 and action in PUBLIC_ACTIONS:
+        if security_schema(state)>=5 and action in PUBLIC_ACTIONS:
             from 协作执行 import default_context
             selected=default_context(state,actor)
             data=state['security'].get('execution',{})
@@ -668,14 +615,14 @@ class Service:
         if action == "claim":
             fields(body, "request_id task_id version scope_version" +
                    ''.join(' '+k for k in ('notice','execution_protocol','context_id','context_version') if k in body))
-            if state.get('security', {}).get('schema', 0) >= 5 and body.get('execution_protocol') != 5:
+            if security_schema(state) >= 5 and body.get('execution_protocol') != 5:
                 raise ClientError('领取需要支持执行协议5的客户端；请更新客户端，旧领取仍可受限收尾',409)
             task_id = string(body["task_id"], "task_id", 16)
             if task_id not in state["tasks"] or not rules.visible(state, state["tasks"][task_id], actor):
                 raise ClientError("任务不存在", 404)
             if rules.enabled(state):
                 selected=None
-                if state.get('security',{}).get('schema',0)>=5 and body.get('context_id'):
+                if security_schema(state)>=5 and body.get('context_id'):
                     from 协作执行 import context_record
                     if 'context_version' not in body:
                         raise ClientError('指定配置时须同时提供配置版本')
@@ -735,7 +682,7 @@ class Service:
             optional = f" {name}" if name and name in body else ""
         if action=='resume':
             optional+=''.join(' '+k for k in ('execution_protocol','context_id','context_version') if k in body)
-            if state.get('security',{}).get('schema',0)>=5 and body.get('execution_protocol')!=5:
+            if security_schema(state)>=5 and body.get('execution_protocol')!=5:
                 raise ClientError('继续任务需要执行协议5；旧回合事实和已有产物保留',409)
         fields(body, "request_id claim_id " + suffix + optional)
         cid = string(body["claim_id"], "claim_id", 100)
@@ -1009,7 +956,7 @@ class Service:
                 "stage": stage(task, active_claim(state, task), state),
                 'execution_status':execution_status(state,active_claim(state,task)),
                 "claims": deepcopy(permitted),
-                'execution_protocol':5 if state.get('security',{}).get('schema')==5 else None,
+                'execution_protocol':5 if security_schema(state)==5 else None,
                 'default_context':state.get('security',{}).get('execution',{}).get('defaults',{}).get(actor),
                 'execution_contexts':[deepcopy(row) for row in state.get('security',{}).get('execution',{}).get('contexts',{}).values()
                                       if row.get('executor_id')==actor],
@@ -1112,7 +1059,7 @@ class Service:
         with self.lock:
             snap = self.snapshot()
             state = snap["state"]
-            list_full = state.get('security',{}).get('schema',0)<5
+            list_full = security_schema(state)<5
             if route in {'tasks','task-options'} and isinstance(argument,dict):
                 list_full = argument.get('full') == '1'
                 argument = argument.get('project')

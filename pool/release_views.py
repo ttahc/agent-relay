@@ -29,7 +29,7 @@ def invitation_owners(state,actor,project):
 
 def readiness(state,actor):
     from .round_projects import view
-    from .service import stage,active_claim
+    from .task_state import stage,active_claim
     visible=[t for t in state['tasks'].values() if rules.visible(state,t,actor)]
     waiting=[{'id':t['task_id'],'title':t['title'],'status':stage(t,active_claim(state,t),state)} for t in visible
              if t['title'].startswith(('AI 接入修复','v0.')) and t['status'] not in {'completed','cancelled'}]
