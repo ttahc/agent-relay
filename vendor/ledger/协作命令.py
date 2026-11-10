@@ -19,7 +19,7 @@ SCHEDULE.add("assign_receiver")
 SCHEDULE.add("pilot")
 SCHEDULE.add("board_layout")
 SCHEDULE.update({"flow_setup", "flow_enable", "flow_rebase"})
-HOLDER = {"ack_scope", "stopped", "acquire", "seal", "withdraw_delivery", "release", "owner_ack"}
+HOLDER = {"ack_scope", "stopped", "acquire", "seal", "withdraw_delivery", "release", "owner_ack", "executor_complete"}
 RANK = {"pause": 1, "reject": 2, "revoke": 3, "replace": 4, "cancel": 5}
 CARRYABLE = {"available", "running"}
 TERMINAL = {"completed", "closed_missing", "cancelled", "replaced", "merged", "closed_candidate"}
@@ -389,6 +389,8 @@ def new_task(state, proposal, payload, seq, related=None):
     if "contract" in payload:
         from 协作升级 import task_spec
         task["contract"] = {**task_spec(state, payload["contract"]), "open": False}
+        if task["contract"].get("completion_policy") == "executor-direct":
+            state["pilot"]["format"]["min_reader"] = max(7, state["pilot"]["format"].get("min_reader", 1))
     state["tasks"][task_id] = task
     no_cycles(state)
     proposal.update(status="registered", task_id=task_id)
@@ -432,7 +434,7 @@ def decide(state, env, context):
             authority(state, p)
             require(c["E"]["state"] == "stopped" and text(c.get("stop_evidence")) or
                     p.get("user_decision") == "release-unknown", "他人活动未结束；未知资源须有用户处置决定")
-        if command in {"ack_scope", "acquire", "seal"}:
+        if command in {"ack_scope", "acquire", "seal", "executor_complete"}:
             require(env["expects"].get("epoch:" + c["claim_id"]) == c["epoch"], "须声明当前执行代次", "retryable")
     task = state["tasks"].get(p.get("task_id"))
     if command == "pilot":
@@ -634,18 +636,36 @@ def decide(state, env, context):
         rev.update(status="withdrawn", reason=p["reason"])
         if c["W"]["state"] == "review" and c["W"]["revision"] == p["revision"]:
             c["W"]["state"] = "revision"
-    elif command == "review":
+    elif command in {"review", "executor_complete"}:
         c = state["claims"].get(p.get("claim_id"))
         require(c is not None, "领取不存在")
         task = state["tasks"][c["task_id"]]
         direct = task.get("user_acceptance", {})
         user_accepted = user_acceptance(state, task, actor) or (actor == state["coordinator"] and direct.get("scope_version") == task["scope_version"] == c["deliveries"].get(p.get("revision"), {}).get("scope_version") and
                          direct.get("authority_ref") in state["authorities"] and p.get("user_acceptance_authority") == direct.get("authority_ref"))
-        require(actor == task["receiver"] and (actor != c["origin"] or user_accepted), "须由指定独立接收者或本范围用户明确授权接收")
+        executor_completed = command == "executor_complete"
+        if executor_completed:
+            from 协作升级 import completion_policy
+            require(completion_policy(task) == "executor-direct" and actor == c["origin"] and
+                    c["L"] == "active" and not task.get("cancel_requested") and not c.get("scope_ack_pending") and
+                    env["expects"].get("scope:" + task["task_id"]) == task["scope_version"] == c["W"]["scope"] and
+                    p.get("verdict") == "accept", "直接完成策略、持有者或当前范围不匹配")
+            require(c["W"]["state"] == "review" and c["W"]["revision"] == p.get("revision"), "须直接完成当前封存修订")
+            require(not p.get("redirect") and not p.get("remaining"), "直接完成不得转移或降级遗留项")
+        else:
+            require(actor == task["receiver"] and (actor != c["origin"] or user_accepted), "须由指定独立接收者或本范围用户明确授权接收")
         require(not (c["L"] == "ended" and c["E"].get("reason") in {"cancel", "revoke", "replace"}), "终止领取的待审产出仅留证据")
         rev = c["deliveries"].get(p.get("revision"))
         require(rev and rev["status"] == "review" and p.get("manifest_sha256") == rev["manifest_sha256"], "修订待审态或manifest不匹配")
         require(rev["manifest_sha256"] in context.get("verified_manifests", set()), "验收须复核原manifest及负载")
+        if executor_completed:
+            require(p.get("manifest") == rev.get("manifest") and rev["scope_version"] == task["scope_version"], "直接完成须引用当前冻结清单")
+            prefix = rev["manifest"]["path"].rsplit("/", 1)[0]
+            refs = [{"path": prefix + "/" + row["path"], "sha256": row["sha256"].lower()}
+                    for row in context.get("manifest_data", {}).get("outputs", [])]
+            require(isinstance(p.get("checks"), list) and all(isinstance(check, dict) and isinstance(check.get("evidence"), dict) and
+                        check["evidence"].get("artifact") in refs and not check.get("reuse")
+                        for check in p.get("checks", [])), "直接完成分项须引用当前封存产物证据")
         verdict = p.get("verdict")
         require(verdict in {"received", "pending", "accept", "revision", "reject"}, "未知验收结论")
         checks = p.get("checks", [])
@@ -704,7 +724,10 @@ def decide(state, env, context):
                                      "manifest": rev.get("manifest"), "repository_outputs": rev.get("repository_outputs", {}),
                                      "verdict": verdict, "checks": checks, "origin": actor, "seq": seq,
                                      "tested_artifacts": p.get("tested_artifacts", [])}
-        if user_accepted:
+        if executor_completed:
+            state["acceptances"][aid].update(completion_kind="executor-direct", independent=False,
+                                             completion_policy="executor-direct")
+        if user_accepted and not executor_completed:
             state["acceptances"][aid]["user_acceptance_authority"] = direct.get("authority_ref") or task["contract"]["user_basis"]
         rev["payload_status"] = "verified"
         if verdict not in {"received", "pending"}:
@@ -861,6 +884,9 @@ def decide(state, env, context):
                                                "verdict": "complete" if not prepared["missing"] else "missing",
                                                "summary": prepared["summary"], "missing": prepared["missing"], "proven": p.get("proven", [])}
         state["closings"][env["event_id"]].update(acceptance_id=prepared["acceptance_id"], accepted_manifest=prepared["accepted_manifest"])
+        completion = state["acceptances"][task["accepted"]]
+        if completion.get("completion_kind") == "executor-direct":
+            state["closings"][env["event_id"]].update(completion_kind="executor-direct", independent=False)
         task["status"] = "closed_missing" if prepared["missing"] else ("closed_candidate" if task["kind"] == "candidate" else "completed")
         task["close_id"] = env["event_id"]
         parent = state["tasks"].get(task.get("parent"))
@@ -903,7 +929,7 @@ def decide(state, env, context):
         raise Rejected("未知命令：" + command)
     if state["migration"]["phase"] == "active" and command not in {"note", "owner_ack", "cutover"} and state != before:
         state["migration"]["business_changed"] = True
-    if state.get("flow_config", {}).get("phase") == "active" and command in {"seal", "review", "withdraw_delivery", "commit_record", "correction"}:
+    if state.get("flow_config", {}).get("phase") == "active" and command in {"seal", "review", "executor_complete", "withdraw_delivery", "commit_record", "correction"}:
         from 协作流水规则 import runtime_stamp
         if state != before or runtime_stamp(state) != runtime_stamp(before):
             state["flow_config"]["last_seq"] = seq

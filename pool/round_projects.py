@@ -118,7 +118,28 @@ def payload(state, actor, action, body, key):
     return out
 
 
-def view(state, actor, project=None):
+def feedback_query(query):
+    if not isinstance(query, str) or len(query) > 200:
+        raise ClientError("反馈搜索词须为不超过 200 字的文本")
+    return query.strip()
+
+
+def feedback_matches(record, query):
+    """Search only a visibility-filtered, public record, including its evidence trail."""
+    def strings(value):
+        if isinstance(value, str):
+            yield value
+        elif isinstance(value, dict):
+            for item in value.values():
+                yield from strings(item)
+        elif isinstance(value, list):
+            for item in value:
+                yield from strings(item)
+    return not query or any(query.casefold() in value.casefold() for value in strings(record))
+
+
+def view(state, actor, project=None, query=""):
+    query = feedback_query(query)
     from .privacy import public
     if project and not (rules.roles(state, project, actor) or rules.system_admin(state, actor)):
         raise ClientError("项目不存在或无权查看", 404)
@@ -134,7 +155,10 @@ def view(state, actor, project=None):
             record["author"] == actor or rules.manager(state, target, actor) or rules.system_admin(state, actor)
         ):
             continue
-        groups[kind].append(public(record))
+        visible = public(record)
+        if kind == "feedback" and not feedback_matches(visible, query):
+            continue
+        groups[kind].append(visible)
     managed = [v["id"] for k, v in state["pilot"].items() if k.startswith("project:") and
                (rules.manager(state, v["id"], actor) or rules.system_admin(state, actor))]
     return {"project": project, "managed": bool(project and rules.manager(state, project, actor)),

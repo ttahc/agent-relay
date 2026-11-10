@@ -162,6 +162,25 @@ def inspect(desk, env, state):
     if command.startswith("flow_"):
         from 协作流水 import inspect_flow
         return inspect_flow(desk, env, state)
+    if command == 'pilot' and p.get('op') == 'task-issue-review' and p.get('verdict') == 'resolved':
+        from 协作复查 import source
+        checked = p.get('checked_source') or {}
+        target = state.get('tasks', {}).get(checked.get('task_id'))
+        if checked != source(state, target):
+            raise Rejected('复核所指交付已变化')
+        checksum, _ = manifest(desk, checked['manifest'])
+        result['verified_manifests'] = {checksum}
+    if command == 'pilot' and p.get('op') == 'task-repair-open' and p.get('include_original_delivery') is True:
+        from 协作复查 import source
+        baseline = p.get('baseline_source') or {}
+        original = state.get('tasks', {}).get(baseline.get('task_id'))
+        if baseline != source(state, original):
+            raise Rejected('返修基线的原收口已变化')
+        ref = baseline['manifest']
+        _, data = manifest(desk, ref)
+        prefix = ref['path'].rsplit('/', 1)[0]
+        result['repair_baseline'] = {ref['path']: ref['sha256'],
+            **{prefix + '/' + row['path']: row['sha256'].lower() for row in data['outputs']}}
     requested = p.get("resources", [])
     if command == "claim" and p.get("task_id") in state["tasks"]:
         requested = state["tasks"][p["task_id"]]["resources"]
@@ -170,7 +189,7 @@ def inspect(desk, env, state):
     for raw in requested:
         if isinstance(raw, dict) and isinstance(raw.get("id"), str) and raw["id"].startswith("path:"):
             safe(Path(__file__).resolve().parents[2], raw["id"][5:])
-    if command in {"seal", "review"}:
+    if command in {"seal", "review", "executor_complete"}:
         reference = p.get("manifest")
         if not reference:
             raise Rejected("须引用本机已收到的manifest载荷")
@@ -236,7 +255,7 @@ def inspect(desk, env, state):
                     verify_record(state["flow_records"][key]["reference"], state["flow_config"])
         for reference in p.get("tested_artifacts", []):
             checked_file(desk.store, reference)
-        if command == "review":
+        if command in {"review", "executor_complete"}:
             for reference in typed_references(p.get("checks", [])):
                 checked_file(desk.store, reference)
     if command in {"close", "correction"} and (command == "close" or p.get("verdict") == "complete"):

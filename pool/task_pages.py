@@ -144,6 +144,53 @@ def file_list(title, refs, record=""):
     return f'<section class="detail-group"><h2>{title}</h2>{record}<ul class="file-list">{rows}</ul></section>'
 
 
+def collaboration_links(view):
+    if not view.get("round"):
+        return ""
+    task = view["task"]
+    project = (task.get("contract") or {}).get("project_id", "")
+    query = {"task_id": task["task_id"]}
+    if project:
+        query["project"] = project
+    links = (f'<a class="secondary" href="{escape("/communication?" + urlencode(query), quote=True)}">任务沟通与经验</a>')
+    if task["status"] in {"completed", "closed_missing"} or view["stage"] in {"completed", "closed_missing"}:
+        links += f'<a class="secondary" href="{escape("/post-completion?" + urlencode({"task_id": task["task_id"]}), quote=True)}">完成后复查</a>'
+    return f'<nav class="buttons" aria-label="任务协作">{links}</nav>'
+
+
+def executor_direct(task):
+    return (task.get("contract") or {}).get("completion_policy", task.get("completion_policy", "review-required")) == "executor-direct"
+
+
+def completion_notice(view):
+    if not executor_direct(view["task"]):
+        return ""
+    accepted = view["task"].get("accepted")
+    completed = any((bundle.get("review") or {}).get("completion_kind") == "executor-direct"
+                    and (not accepted or (bundle.get("review") or {}).get("acceptance_id") == accepted)
+                    for bundle in view.get("deliveries", []))
+    text = "执行者完成，未做独立审查" if completed else "完成方式：执行者可凭交付证据直接完成；独立验收可选。"
+    return f'<p class="muted-text" role="status">{text}</p>'
+
+
+def executor_completion(actor, view):
+    task, claim = view["task"], view["active"]
+    if not executor_direct(task):
+        return ""
+    if task["status"] == "pending_close" and view.get("direct_close_allowed"):
+        return form("close", "完成收口并归档", {"task_id": task["task_id"]})
+    if (not claim or claim["origin"] != actor or claim["W"]["state"] != "review"
+            or task.get("cancel_requested") or task.get("accepted")
+            or "executor" not in view.get("direct_roles", view["roles"])):
+        return ""
+    latest = next((b for b in view["deliveries"] if b["claim_id"] == claim["claim_id"]
+                   and b["revision"]["revision"] == claim["W"]["revision"]), None)
+    if latest:
+        from .workbench import review_forms
+        return review_forms(claim, latest, direct=True, finish=bool(view.get("round")))
+    return '<p class="muted-text">交付证据尚不可核对，暂不能直接完成。</p>'
+
+
 def worker_actions(actor, task, claim, qualification=None, execution_protocol=None):
     if task["status"] == "available":
         if qualification and not qualification["eligible"]:
@@ -217,7 +264,7 @@ def receiver_actions(actor, task, claim, bundles, admin):
     if task.get("cancel_requested") or task.get("accepted"):
         return ""
     actions = ""
-    if assigned and claim and claim["W"]["state"] == "review":
+    if assigned and claim and claim["W"]["state"] == "review" and not (executor_direct(task) and claim["origin"] == actor):
         latest = next((b for b in bundles if b["claim_id"] == claim["claim_id"]
                        and b["revision"]["revision"] == claim["W"]["revision"]), None)
         if latest:
@@ -251,6 +298,24 @@ def execution_runtime(view):
     return f'<p role="status">{escape(text)}</p>'
 
 
+def rework_sections(view, css="detail-group", heading="h2"):
+    """Separate actionable local items from retained evidence, without mutating it."""
+    current, history = [], []
+    closed = view["stage"] in ARCHIVED | {"closed_candidate"}
+    for item in view["items"]:
+        active = (not closed and item["status"] == "unresolved"
+                  and item.get("holder") in {None, view["task"]["task_id"]})
+        label = "待处理" if active else {"resolved": "已解决", "unresolved": "历史未结项（非当前操作）"}.get(item["status"], "已结束")
+        row = (f'<li><strong>{escape(item["criterion"] or "返修项")}</strong> '
+               f'{escape(item["description"])} <span class="muted">{label}</span></li>')
+        (current if active else history).append(row)
+    output = ""
+    for key, title, rows in (("current", "当前返修项", current), ("history", "历史返修记录", history)):
+        if rows:
+            output += f'<section class="{css}" data-rework="{key}"><{heading}>{title}</{heading}><ul>{"".join(rows)}</ul></section>'
+    return output
+
+
 def detail(actor, view):
     from .upgrade_pages import task_contract
 
@@ -259,21 +324,20 @@ def detail(actor, view):
     handoffs = file_list("接续材料", view["handoffs"])
     criteria = "".join(f"<li>{escape(item)}</li>" for item in task["completes_on"])
     actions = worker_actions(actor, task, claim, view.get("qualification"), view.get("execution_protocol")) if "executor" in view["roles"] else ""
+    actions += executor_completion(actor, view)
     actions += receiver_actions(actor, task, claim, view["deliveries"], bool({"admin", "manager"} & set(view["roles"])))
-    controls = f'<section class="detail-group"><h2>当前可办操作</h2>{actions}</section>' if actions else ""
+    controls = f'<section class="detail-group"><h2>当前可办操作</h2>{actions or "<p class=muted>当前没有可办操作，历史记录保留供追溯。</p>"}</section>'
     revisions = []
     for bundle in view["deliveries"]:
         rev = bundle["revision"]
-        label = {"review": "待验收", "revision": "退回返修", "accepted": "已接受"}.get(rev["status"], rev["status"])
+        label = {"review": "待完成确认" if executor_direct(task) else "待验收", "revision": "退回返修", "accepted": "已接受"}.get(rev["status"], rev["status"])
+        if (bundle.get("review") or {}).get("completion_kind") == "executor-direct":
+            label = "执行者完成，未做独立审查"
         review = bundle["review"]
         record = (f'<p class="muted">接收者 {escape(review["origin"])} · 账本位置 {review["seq"]}</p>' if review else "")
         revisions.append(file_list(f'{escape(rev["revision"])} · {escape(label)}',
                                    [rev["manifest"], *bundle["outputs"]], record))
-    items = "".join(f'<li><strong>{escape(item["criterion"] or "返修项")}</strong>'
-                    f'<span> {escape(item["description"])}</span> '
-                    f'<span class="muted">{"已解决" if item["status"] == "resolved" else "待处理" if item["status"] == "unresolved" else "已结束"}</span></li>'
-                    for item in view["items"])
-    rework = f'<section class="detail-group"><h2>返修记录</h2><ul>{items}</ul></section>' if items else ""
+    rework = rework_sections(view)
     close = file_list("归档证据", [view["close"]["summary"]]) if view["close"] else ""
     cancel = view["cancel_note"]
     note = f'<p class="muted intro">取消原因　{escape(cancel["text"])}</p>' if cancel else ""
@@ -283,12 +347,15 @@ def detail(actor, view):
         labels = {"claimed": "已领取，执行回报待确认", "intent": "开工请求已登记", "started": "已回报开始", "waiting": "等待输入",
                   "working": "继续执行", "finished": "执行回报结束", "error": "执行异常"}
         runtime = f'<p role="status">当前代次 {claim["epoch"]} · {labels[run["state"]]} {escape(run.get("evidence", ""))}</p>'
+    stage_label = STAGES.get(view["stage"], view["stage"])
+    if executor_direct(task):
+        stage_label = {"review": "待完成确认", "accepted": "已确认完成 · 待停止"}.get(view["stage"], stage_label)
     return workspace(actor, f"""<article class="task-panel">
   <div class="section-title">
     <div><span class="task-id">{escape(task['task_id'])}</span><h1>{escape(task['title'])}</h1>{project_label(task)}</div>
-    <span class="status">{escape(STAGES.get(view['stage'], view['stage']))}</span>
+    <span class="status">{escape(stage_label)}</span>
   </div>
-  {note}{runtime}
+  {collaboration_links(view)}{note}{completion_notice(view)}{runtime}
   <section class="detail-group"><h2>完成判据</h2><ul>{criteria}</ul></section>
-  {task_contract({**view, "viewer": actor})}{inputs}{handoffs}{rework}{"".join(revisions)}{close}{controls}
+  {controls}{task_contract({**view, "viewer": actor})}{inputs}{handoffs}{rework}{"".join(revisions)}{close}
 </article>""")

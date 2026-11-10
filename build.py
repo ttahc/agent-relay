@@ -17,13 +17,13 @@ FILES = [".gitignore", "LICENSE", "README.md", "build.py", "taskpool.py", "pool/
          "pool/delegation.py", "pool/delegation_pages.py", "pool/invite_links.py",
          "pool/privacy.py", "pool/release_views.py", "pool/release_pages.py", "pool/display_time.py", "pool/backup.py", "pool/input_packages.py",
          "pool/window_admin.py", "pool/window_admin_pages.py", "pool/lifecycle.py", "pool/wakeups.py", "pool/sessions.py", "pool/safety.py", "pool/execution.py", "pool/execution_pages.py",
-         "pool/task_pages.py", "pool/upgrade.py", "pool/upgrade_pages.py",
+         "pool/collaboration_visibility.py", "pool/post_completion.py", "pool/post_completion_pages.py", "pool/task_communication.py", "pool/task_communication_pages.py", "pool/task_pages.py", "pool/upgrade.py", "pool/upgrade_pages.py",
          "pool/taskpool.css", "pool/workbench.py", "pool/workbench_pages.py", "pool/workbench.css", "pool/workbench.js", "vendor/SHA256SUMS", "docs/内网任务服务升级操作.md", "docs/本轮优化操作.md",
          "ops/podman-up.sh", "ops/fresh-install.sh", "ops/upgrade-local.sh", "ops/Set-LanIngress.ps1",
          "ops/Set-EasyTierIngress.ps1", "ops/verify-peer.py", "ops/round-client.py", "ops/round-client.ps1", "ops/round-local.sh",
          "ops/backup-store.py", "ops/safe-local-upgrade.sh", "ops/verify-release.py", "ops/launch-config.py", "ops/verify-backup.py",
          "ops/install-local-backup.sh", "ops/local-backup.sh", "ops/taskpool-local-backup.service", "ops/taskpool-local-backup.timer",
-         "docs/AI客户端操作.md", "docs/运维与升级.md"]
+         "docs/AI客户端操作.md", "docs/运维与升级.md", "docs/统一任务流程.md"]
 
 
 def bundle_bytes():

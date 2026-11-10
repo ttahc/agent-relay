@@ -116,6 +116,10 @@ def scope_contract(state, body, task_id=None):
     data = {key: body[key] for key in ("project_id", "iteration", "delivery", "requirements", "review_mode", "user_basis")}
     if "dispatch" in body:
         data["dispatch"] = body["dispatch"]
+    if "completion_policy" in body:
+        data["completion_policy"] = body["completion_policy"]
+    elif task_id:
+        data["completion_policy"] = rules.completion_policy(state["tasks"][task_id])
     spec = rules.task_spec(state, data, task_id)
     return spec, rules.dependency_rows(state, body["dependencies"], spec["project_id"], task_id), rules.resources(body["resources"])
 
@@ -197,7 +201,7 @@ def migrate(actor, body, expects):
 
 def register(service, actor, key, body, state, expects):
     required = "request_id title brief criteria kind " + SCOPE_FIELDS
-    fields(body, required + (" receiver" if "receiver" in body else "") + (" dispatch" if "dispatch" in body else ""))
+    fields(body, required + (" receiver" if "receiver" in body else "") + (" dispatch" if "dispatch" in body else "") + (" completion_policy" if "completion_policy" in body else ""))
     receiver = identifier(body.get("receiver", actor), "接收者")
     title = string(body["title"], "任务标题", 200)
     if body["kind"] != "documentation":
@@ -357,7 +361,7 @@ def task_operation(op):
     kind = op.action.removeprefix("task-")
     suffix = {"publish": "scope_version", "hold": "scope_version", "scope": "scope_version " + SCOPE_FIELDS,
               "interrupt": "claim_id epoch", "recover": "claim_id epoch evidence notes unresolved"}[kind]
-    fields(body, "request_id task_id version reason " + suffix + (" dispatch" if kind == "scope" and "dispatch" in body else ""))
+    fields(body, "request_id task_id version reason " + suffix + (" dispatch" if kind == "scope" and "dispatch" in body else "") + (" completion_policy" if kind == "scope" and "completion_policy" in body else ""))
     task_id = identifier(body["task_id"], "任务编号")
     task = state["tasks"].get(task_id)
     if not task or not rules.contract(task) or not rules.visible(state, task, actor):
@@ -476,6 +480,28 @@ def sources(state, actor):
     return sorted(result, key=lambda item: item["number"])
 
 
+def collaboration_event_visible(state, actor, entry):
+    """Current source visibility also gates broad activity/audit metadata."""
+    from .collaboration_visibility import request_visible
+    if entry.get("request", {}).get("collaboration_scope") and not request_visible(state, actor, entry.get("request", {})):
+        return False
+    from 协作沟通 import record_visible
+    from 协作复查 import visible as issue_visible
+    for effect in entry.get('effects', []):
+        path = effect.get('path', [])
+        if len(path) != 2 or path[0] != 'round':
+            continue
+        key = path[1]
+        row = state.get('round', {}).get(key, effect.get('value'))
+        if not isinstance(row, dict):
+            continue
+        if key.startswith(('message:', 'experience:')) and not record_visible(state, row, actor):
+            return False
+        if key.startswith('task-issue:') and not issue_visible(state, row, actor):
+            return False
+    return True
+
+
 def activity_rows(service, snap, actor, limit=1000):
     """Applied task events the actor may see, newest first."""
     state, admin, rows = snap["state"], service.is_admin(actor), []
@@ -483,6 +509,8 @@ def activity_rows(service, snap, actor, limit=1000):
         if len(rows) >= limit:
             break
         if entry["type"] != "decision" or entry["result"] != "applied":
+            continue
+        if not collaboration_event_visible(state, actor, entry):
             continue
         record = dict(entry.get("request", {}))
         record.setdefault("actor", entry["origin_id"])
@@ -526,6 +554,11 @@ def audit_rows(service, snap, actor, query):
     for entry in snap["entries"]:
         if entry["type"] != "decision":
             continue
+        if not collaboration_event_visible(state, actor, entry):
+            hidden = entry.get('request', {})
+            if hidden.get('request_id'):
+                seen.add((hidden.get('actor') or entry.get('origin_id'), hidden['request_id']))
+            continue
         record = dict(entry.get("request", {}))
         record.setdefault("actor", entry["origin_id"])
         record["origin_id"] = entry["origin_id"]
@@ -559,6 +592,9 @@ def audit_rows(service, snap, actor, query):
             "SELECT c.details,r.status,r.response FROM request_context c JOIN requests r ON c.request_key=r.key "
             "ORDER BY r.rowid"):
         record = json.loads(raw)
+        from .collaboration_visibility import request_visible
+        if not request_visible(state, actor, record):
+            continue
         ids = {record["task_id"]} if record.get("task_id") else set()
         if (status is not None and (record["actor"], record["request_id"]) in seen) or not matches(ids, record) or not allowed(ids, record):
             continue

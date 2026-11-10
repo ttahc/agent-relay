@@ -12,6 +12,10 @@ OPS = {"round-migrate", "ai-invite", "ai-revoke", "ai-prepare", "ai-activate", "
        "decision-save", "task-relation", "change-open", "change-finish", "feedback-save", "feedback-update", "feedback-move",
        "delegate-grant", "delegate-revoke", "window-admin", "capability-request", "capability-resolve"}
 
+from 协作复查 import OPS as RECHECK_OPS
+from 协作沟通 import ACTIONS as COMMUNICATION_OPS
+OPS |= RECHECK_OPS | COMMUNICATION_OPS
+
 DELEGATION_EXECUTION = {"claim", "deliver", "deliver-files", "stop", "handoff", "run-report", "resume"}
 DELEGATION_MANAGEMENT = {"register", "task-publish", "task-hold", "feedback-update"}
 DELEGATION_ACTIONS = {"read", "feedback-save", "capability-save"} | DELEGATION_EXECUTION | DELEGATION_MANAGEMENT
@@ -313,7 +317,7 @@ def action(state, env, context):
                 "迁移需要 v2 数据、管理员和已结束的活动领取")
         require("release:" + p["upgrade"] not in state["pilot"], "本轮版本号已使用")
         state["round"]["format"] = {"from": 2, "event": event_id, "prior": dict(fmt), "at": now}
-        fmt.update(schema=VERSION, min_reader=VERSION, maintenance=True, image=p["image"], upgrade=p["upgrade"])
+        fmt.update(schema=VERSION, min_reader=max(VERSION, fmt.get("min_reader", 1)), maintenance=True, image=p["image"], upgrade=p["upgrade"])
         state["pilot"]["release:" + p["upgrade"]] = {
             "status": "pending", "image": p["image"], "by": actor, "schema": VERSION,
         }
@@ -321,7 +325,13 @@ def action(state, env, context):
     require(enabled(state), "请先迁移本轮数据合同")
     require(not fmt["maintenance"] or op == "password-event" and p["kind"] == "admin-recovery",
             "服务处于维护窗口")
-    if op in {"ai-invite", "ai-revoke", "ai-prepare", "ai-activate", "token-prepare"}:
+    if op in RECHECK_OPS:
+        from 协作复查 import action as recheck_action
+        recheck_action(state, p, actor, now, event_id, context['seq'], context)
+    elif op in COMMUNICATION_OPS:
+        from 协作沟通 import action as communication_action
+        communication_action(state, p, actor, now, event_id)
+    elif op in {"ai-invite", "ai-revoke", "ai-prepare", "ai-activate", "token-prepare"}:
         enrollment_action(state, p, actor, now, event_id)
     elif op in {"delegate-grant", "delegate-revoke"}:
         delegation_action(state, p, actor, now, event_id)

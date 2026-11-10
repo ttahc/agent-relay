@@ -48,10 +48,23 @@ def features(r, argument):
     result.update(api_protocol=1, input_download=dict(input_packages.BUDGET))
     result.setdefault('features', {})['input-package'] = True
     result['features']['list-summary'] = True
+    result['features'].update({'executor-complete': r.upgraded, 'post-completion': r.round_enabled, 'task-communication': r.round_enabled})
+    result['workflow'] = {'reader': 7, 'completion_policies': ['review-required', 'executor-direct']}
     if r.round_enabled:
         result['features']['wait'] = True
         result['wait'] = {'max_seconds': wakeups.MAX_HOLD}
     return result
+
+
+def post_completion(r, argument):
+    from .post_completion import view
+    return view(r.state, r.actor, argument)
+
+
+def communication(r, argument):
+    from .task_communication import view
+    query = argument or {}
+    return view(r.state, r.actor, query.get('project'), query.get('task_id'), query.get('q', ''))
 
 
 def execution_view(r, argument):
@@ -96,6 +109,8 @@ def notices(r, argument):
 
 
 def collaboration(r, argument):
+    if isinstance(argument, dict):
+        return round_projects.view(r.state, r.actor, argument.get("project"), argument.get("q", ""))
     return round_projects.view(r.state, r.actor, argument)
 
 
@@ -105,7 +120,8 @@ def sheet(r, argument):
         raise ClientError("任务不存在", 404)
     task = tasks[argument]
     view = service.detail(r.state, task, r.actor)
-    brief = next((service.checked_file({"path": path, "sha256": sha}).decode("utf-8")
+    primary = task.get("primary_brief")
+    brief = service.checked_file(primary).decode("utf-8") if primary and task["inputs"].get(primary.get("path")) == primary.get("sha256") else next((service.checked_file({"path": path, "sha256": sha}).decode("utf-8")
                   for path, sha in task["inputs"].items() if path.endswith("/brief.md")), "")
     return {"view": view, "brief": brief, "events": upgrade.audit_rows(service, r.snap, r.actor, {"task": argument})}
 
@@ -159,7 +175,13 @@ def overview(r, argument):
         last = next((state["claims"][cid] for cid in reversed(task["claims"])
                      if cid in state["claims"] and state["claims"][cid].get("task_id") == task["task_id"]), None)
         last_identity = (rules.identity(state, last["origin"]) or {}) if last else {}
-        shown.append({**task, "stage": stage(task, current, state),
+        completion = state.get('acceptances', {}).get(task.get('accepted'), {})
+        provenance = {'completion_policy': rules.completion_policy(task),
+                      'direct_close_allowed': rules.direct_closer(state, task, actor)}
+        if completion:
+            provenance.update(completion_kind=completion.get('completion_kind', 'review'),
+                              independent=completion.get('independent'), completed_by=completion.get('origin'))
+        shown.append({**task, **provenance, "stage": stage(task, current, state),
                       'execution_status': execution_status(state, current),
                       "project_name": project["name"] if project else None,
                       "window": (rules.identity(state, current["origin"]) or {}).get("window") if current else None,
@@ -390,7 +412,7 @@ def stored_file(r, argument):
 
 
 ROUTES = {
-    "features": features, "execution": execution_view, "window-impact": window_impact,
+    "features": features, "execution": execution_view, "post-completion": post_completion, "communication": communication, "window-impact": window_impact,
     "capability-requests": capability_requests, "cleanup": cleanup, "invitations": invitations, "runner": runner,
     "notices": notices, "collaboration": collaboration, "sheet": sheet, "tasks": tasks, "task-options": task_options,
     "overview": overview, "activity": activity, "project-cards": project_cards, "project": project,

@@ -127,7 +127,10 @@ def events(service, state, actor):
             continue
         target = {"task_id": task["task_id"], "claim_id": claim["claim_id"]}
         work = claim["W"]
-        if task.get("receiver") == actor and work["state"] == "review" and service.visible(state, task, actor):
+        direct = (task.get("contract") or {}).get("completion_policy") == "executor-direct"
+        if direct and claim["origin"] == actor and work["state"] == "review" and service.visible(state, task, actor):
+            add("completion-requested", [claim["claim_id"], work["scope"], work.get("revision")], **target, revision=work.get("revision"))
+        if not direct and task.get("receiver") == actor and work["state"] == "review" and service.visible(state, task, actor):
             add("review-requested", [claim["claim_id"], work["scope"], work.get("revision")], **target, revision=work.get("revision"))
         if claim["origin"] != actor:
             continue
@@ -138,12 +141,32 @@ def events(service, state, actor):
             add("interrupted", [claim["claim_id"], recovery.get("event")], **target, reason=recovery.get("reason"))
         if task.get("cancel_requested"):
             add("cancel-requested", [claim["claim_id"]], **target)
+    from 协作沟通 import record_visible
+    from 协作复查 import visible as issue_visible, may_review
+    for record_key, row in state.get('round', {}).items():
+        if record_key.startswith('message:') and record_visible(state, row, actor) and row.get('status') != 'completed' and (
+                row.get('recipient') == actor or not row.get('recipient') and row.get('author') != actor):
+            add('task-message', [row['id'], row['version']], task_id=row['task_id'], record_id=row['id'], version=row['version'])
+        elif record_key.startswith('task-issue:') and issue_visible(state, row, actor) and row['status'] not in {'resolved', 'declined'}:
+            task = state['tasks'].get(row['task_id'])
+            if may_review(state, task, actor) or row['author'] == actor:
+                add('post-completion-issue', [row['id'], row['version']], task_id=row['task_id'], record_id=row['id'], version=row['version'])
     if security_schema(state) >= 5:
         for row in state["security"].get("execution", {}).get("actions", {}).values():
             if row.get("executor_id") == actor and row.get("state") == "granted":
                 add("resource-granted", [row["id"], row.get("grant_id"), row.get("generation")], task_id=row.get("task_id"),
                     claim_id=row.get("claim_id"), action_id=row["id"], grant_id=row.get("grant_id"))
-    return sorted(found, key=lambda event: (event["type"], event["key"]))[:EVENT_LIMIT]
+    # Discussion backlogs must never displace execution/resource safety notices.
+    priority = {'interrupted': 0, 'cancel-requested': 0, 'scope-changed': 1, 'resource-granted': 1,
+                'review-returned': 2, 'completion-requested': 2, 'review-requested': 2, 'task-ready': 3,
+                'post-completion-issue': 4, 'task-message': 5}
+    ordered = sorted(found, key=lambda event: (priority.get(event['type'], 3), event['type'], event['key']))
+    if len(ordered) <= EVENT_LIMIT:
+        return ordered
+    # Hash every authorized event, including omitted ones, so new work always changes the cursor.
+    overflow = {'type': 'more-events', 'key': digest(encoded(['more-events', actor, sorted(e['key'] for e in ordered)])),
+                'count': len(ordered), 'requires_read': True}
+    return [*ordered[:EVENT_LIMIT - 1], overflow]
 
 
 def cursor_of(found):

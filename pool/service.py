@@ -26,7 +26,7 @@ import 协作升级 as rules
 
 
 PUBLIC_ACTIONS = {"register", "claim", "handoff", "deliver", "deliver-files", "stop",
-                  "return", "resume", "review", "close", "cancel", "withdraw"} | upgrade.ACTIONS | round_service.PUBLIC | {
+                  "return", "resume", "review", "executor-complete", "close", "cancel", "withdraw"} | upgrade.ACTIONS | round_service.PUBLIC | {
                     'context-save', 'segment-open', 'action-prepare', 'resource-request', 'resource-cancel', 'action-start',
                     'execution-fact', 'evidence-stash', 'resource-release'}
 
@@ -106,7 +106,7 @@ class Service:
         self.notices = round_service.Notices(self.db)
         snap = self.snapshot()
         fmt = snap["state"]["pilot"].get("format")
-        if fmt and (fmt["schema"] not in {2, 3, 4, 5} or fmt["min_reader"] > 5):
+        if fmt and (fmt["schema"] not in {2, 3, 4, 5} or fmt["min_reader"] > 7):
             raise Unavailable("当前程序不支持数据合同版本")
         self.accounts.baseline_executors(snap)
 
@@ -269,6 +269,12 @@ class Service:
                    "reason": body.get("reason") if isinstance(body.get("reason"), str) else None}
         if body.get('supersedes_request_id'):
             details['supersedes_request_id'] = body['supersedes_request_id']
+        from .post_completion import ACTIONS as RECHECK_ACTIONS
+        from .task_communication import ACTIONS as COMMUNICATION_ACTIONS
+        if action in RECHECK_ACTIONS | COMMUNICATION_ACTIONS:
+            from .collaboration_visibility import request_scope
+            details['collaboration_scope'] = request_scope(state, actor, action, body, plan)
+            details['reason'] = None  # Text remains inside its source-authorized record, never the broad audit feed.
         details.update(delegation.stamp(state, actor, project))
         if security_schema(state) >= 5 and action in PUBLIC_ACTIONS:
             from 协作执行 import default_context
@@ -297,6 +303,9 @@ class Service:
             return
         raw = self.db.execute("SELECT details FROM request_context WHERE request_key=?", (key,)).fetchone()
         details = json.loads(raw[0]) if raw else {}
+        from .collaboration_visibility import request_visible
+        if not request_visible(state, actor, details):
+            raise ClientError("请求来源不存在或当前已无查看授权", 404)
         project = details.get("project_id")
         with delegation.operation_context(state, actor, "read", project, details.get("task_id")):
             if not project or rules.roles(state, project, actor) or rules.system_admin(state, actor):

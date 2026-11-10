@@ -9,7 +9,7 @@ of the interface.
 import base64
 import time
 
-from . import delegation, execution, round_service, upgrade, window_admin
+from . import delegation, execution, round_service, upgrade, window_admin, post_completion, task_communication
 from .constants import COMMITTER, COORDINATOR, step
 from .packages import (ClientError, MAX_PACKAGE, artifact_name, fields, integer, make_delivery, reference,
                        seal_metadata, string, unpack_delivery)
@@ -27,6 +27,7 @@ CLAIM_FIELDS = {
     "resume": "epoch scope_version",
     "withdraw": "epoch scope_version revision reason",
     "review": "revision manifest_sha256 checks",
+    "executor-complete": "epoch scope_version revision manifest_sha256 checks",
     "return": "revision manifest_sha256 criterion reason",
 }
 EXECUTION_OPTIONS = ('execution_protocol', 'context_id', 'context_version')
@@ -35,7 +36,7 @@ EXECUTION_OPTIONS = ('execution_protocol', 'context_id', 'context_version')
 def plan(service, actor, action, key, body, snap):
     state = snap["state"]
     generation = {"generation": state["generation"]}
-    for planner in (execution.plan, delegation.plan, window_admin.plan, round_service.plan):
+    for planner in (execution.plan, delegation.plan, window_admin.plan, post_completion.plan, task_communication.plan, round_service.plan):
         if prepared := planner(service, actor, action, key, body, state):
             return prepared
     if prepared := upgrade.plan(service, actor, action, key, body, snap):
@@ -59,6 +60,8 @@ def plan(service, actor, action, key, body, snap):
             role = [*role, *rules.roles(state, project, actor)]
     admin_action = "admin" in role and action in {"register", "cancel"}
     required_role = "receiver" if action in {"register", "review", "return", "close", "cancel"} else "executor"
+    if action == "close" and rules.direct_closer(state, state["tasks"].get(body.get("task_id")), actor):
+        required_role = "executor"
     if not admin_action and required_role not in role:
         raise ClientError("该身份无权执行此操作", 403)
     if action == "register":
@@ -142,7 +145,8 @@ def claim(service, actor, action, body, state):
 def close(service, actor, body, state, generation):
     fields(body, "request_id task_id")
     task_id = string(body["task_id"], "task_id", 16)
-    service.receiver(state, task_id, actor)
+    if not rules.direct_closer(state, state["tasks"].get(task_id), actor):
+        service.receiver(state, task_id, actor)
     if state["tasks"][task_id]["status"] != "pending_close":
         raise ClientError("任务须已接受，且执行已停止、资源已释放", 409)
     return {"task_id": task_id, "steps": [step(COORDINATOR, "close", {"task_id": task_id}, generation)]}
@@ -173,7 +177,7 @@ def claim_action(service, actor, action, key, body, state, generation):
     suffix = CLAIM_FIELDS[action]
     optional = ""
     if round_service.enabled(state):
-        name = {"deliver-files": "stop_evidence", "review": "finish", "return": "criteria"}.get(action)
+        name = {"deliver-files": "stop_evidence", "review": "finish", "executor-complete": "finish", "return": "criteria"}.get(action)
         optional = f" {name}" if name and name in body else ""
     if action == 'resume':
         optional += ''.join(' ' + k for k in EXECUTION_OPTIONS if k in body)
@@ -204,7 +208,16 @@ def claim_action(service, actor, action, key, body, state, generation):
     expects = {"epoch:" + cid: epoch, "scope:" + task_id: scope}
     if held.get("recovery", {}).get("status") == "pending" and action not in {"stop", "withdraw"}:
         raise ClientError("领取处于恢复待核，须先处理在途操作及占用", 409)
-    if action in {"deliver", "deliver-files"}:
+    if action == "executor-complete":
+        task = state["tasks"][task_id]
+        if rules.completion_policy(task) != "executor-direct" or task.get("cancel_requested"):
+            raise ClientError("此任务未授权执行者直接完成", 403)
+        instruction = service.review(actor, body, held, state, action)
+        instruction["expects"].update(expects)
+        steps = [instruction]
+        if body.get("finish") is True and not held["R"] and held["E"] == {"state": "stopped", "reason": "complete"}:
+            steps.append(step(COORDINATOR, "close", {"task_id": task_id}, generation))
+    elif action in {"deliver", "deliver-files"}:
         steps = delivery(service, actor, action, key, body, held, expects)
     elif action == "resume":
         steps = resume(actor, body, state, held, scope, generation, expects)
@@ -363,7 +376,7 @@ def review(service, actor, body, held, state, action):
     if (not sealed or body["manifest_sha256"] != sealed["manifest_sha256"] or
             held["W"]["state"] != "review" or held["W"]["revision"] != revision):
         raise ClientError("修订号或待验清单 SHA256 不匹配", 409)
-    if held["origin"] == actor and not rules.user_acceptance(state, state["tasks"][held["task_id"]], actor):
+    if action != "executor-complete" and held["origin"] == actor and not rules.user_acceptance(state, state["tasks"][held["task_id"]], actor):
         raise ClientError("持有者不能自行验收", 403)
     payload = {"claim_id": held["claim_id"], "revision": revision, "verdict": "accept",
                "manifest": sealed["manifest"], "manifest_sha256": body["manifest_sha256"]}
@@ -398,4 +411,4 @@ def review(service, actor, body, held, state, action):
     payload.update(checks=checks, resolve=[
         {"item_id": item["item_id"], "check_id": item["criterion"]} for item in resolved
     ])
-    return step(actor, "review", payload, {"item:" + item["item_id"]: item["version"] for item in resolved})
+    return step(actor, "executor_complete" if action == "executor-complete" else "review", payload, {"item:" + item["item_id"]: item["version"] for item in resolved})
