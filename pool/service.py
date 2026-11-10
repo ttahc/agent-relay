@@ -4,16 +4,15 @@ import base64
 from contextlib import contextmanager
 import json
 import os
-import re
 import sqlite3
 import threading
 import time
 
-from . import ROOT, round_service, upgrade, delegation
+from . import ROOT, reads, round_service, task_views, upgrade, delegation
 from .accounts import Accounts
 from .constants import ACCESS_TOKEN, ADMIN, COMMITTER, COORDINATOR, ID, Unavailable, step
 from .auth import Passwords
-from .packages import (ClientError, MAX_PACKAGE, SHA, artifact_name, fields, integer, ledger_package,
+from .packages import (ClientError, MAX_PACKAGE, artifact_name, fields, integer, ledger_package,
                        make_delivery, reference, seal_metadata, string, unpack_delivery)
 from .storage import LedgerBackend
 from .lifecycle import Lifecycle
@@ -21,8 +20,7 @@ from .task_state import active_claim, execution_status, handoff_reference, secur
 from 协作账本 import cursor, envelope
 from 协作交接 import import_package
 from 协作存储 import digest, encoded, publish, safe
-from 协作取证 import checked_file, manifest
-from 协作视图 import render
+from 协作取证 import checked_file
 from 协作存储 import Rejected
 import 协作升级 as rules
 
@@ -883,9 +881,7 @@ class Service:
         return step(actor, "review", payload, {"item:" + item["item_id"]: item["version"] for item in resolved})
 
     def delivery_refs(self, ref):
-        _, data = manifest(self.desk, ref)
-        parent = ref["path"].rsplit("/", 1)[0]
-        return [{"path": parent + "/" + item["path"], "sha256": item["sha256"].lower()} for item in data["outputs"]]
+        return task_views.delivery_refs(self, ref)
 
     def visible(self, state, task, actor):
         with delegation.operation_context(state, actor, "read", rules.task_project(task), task["task_id"]):
@@ -908,423 +904,38 @@ class Service:
         return result
 
     def _delivery_reviews(self, state, task, claims, entries=None):
-        """Project exact sealed-revision acceptance facts without changing stored records."""
-        from copy import deepcopy
-        result = []
-        for claim in claims:
-            for name, delivery in claim.get("deliveries", {}).items():
-                acceptance_id = delivery.get("acceptance_id")
-                review = state.get("acceptances", {}).get(acceptance_id)
-                if (not review or review.get("acceptance_id") != acceptance_id or review.get("task_id") != task["task_id"] or
-                        review.get("claim_id") != claim["claim_id"] or review.get("revision") != name or
-                        delivery.get("revision", name) != name or review.get("manifest_sha256") != delivery.get("manifest_sha256") or
-                        review.get("scope_version") != delivery.get("scope_version") or
-                        review.get("manifest") is not None and review["manifest"] != delivery.get("manifest")):
-                    continue
-                if entries is None:
-                    entries = self.snapshot().get("entries", [])
-                event = next((entry for entry in entries if entry.get("type") == "decision" and entry.get("result") == "applied" and
-                              entry.get("command") == "review" and entry.get("key") == str(review.get("origin")) + "/" + str(acceptance_id) and
-                              entry.get("origin_id") == review.get("origin") and
-                              (review.get("seq") is None or entry.get("ledger_seq") == review["seq"]) and
-                              any(effect.get("path") == ["acceptances", acceptance_id] and effect.get("value") == review
-                                  for effect in entry.get("effects", []))), None)
-                failed = [check["id"] for check in review.get("checks", []) if check.get("status") in {"failed", "not-run"}]
-                notes = list(dict.fromkeys(check.get("evidence", {}).get("note") for check in review.get("checks", [])
-                                           if check.get("id") in failed and isinstance(check.get("evidence"), dict) and
-                                           isinstance(check["evidence"].get("note"), str) and check["evidence"]["note"]))
-                request = (event or {}).get("request", {})
-                reason = request.get("reason") if isinstance(request.get("reason"), str) and request["reason"] else "\n".join(notes)
-                metadata = {"acceptance_id": acceptance_id, "failed_criteria": failed, "reason": reason,
-                            "reviewer": request.get("actor") or review.get("origin"),
-                            "at": (event or {}).get("committed_utc"), "source_event": (event or {}).get("key")}
-                result.append({"claim_id": claim["claim_id"], "revision": name, "manifest": deepcopy(delivery.get("manifest")),
-                               "manifest_sha256": delivery.get("manifest_sha256"), **metadata,
-                               "review": {**deepcopy(review), **metadata}})
-        return result
+        return task_views.delivery_reviews(self, state, task, claims, entries)
 
     def task_view(self, state, task, actor):
-        if not self.visible(state, task, actor):
-            raise ClientError("任务不存在或无权查看", 404)
-        claims = [state["claims"][cid] for cid in task["claims"]]
-        admin = self.is_admin(actor) or round_service.enabled(state) and rules.manager(state, rules.task_project(task), actor)
-        from copy import deepcopy
-        permitted = [c for c in claims if admin or actor in {c["origin"], task["receiver"]}]
-        spec = rules.contract(task)
-        project = rules.project_record(state, spec["project_id"]) if spec else None
-        return {"task": {**task, "project_name": project["name"]} if project else task,
-                "stage": stage(task, active_claim(state, task), state),
-                'execution_status':execution_status(state,active_claim(state,task)),
-                "claims": deepcopy(permitted),
-                'execution_protocol':5 if security_schema(state)==5 else None,
-                'default_context':state.get('security',{}).get('execution',{}).get('defaults',{}).get(actor),
-                'execution_contexts':[deepcopy(row) for row in state.get('security',{}).get('execution',{}).get('contexts',{}).values()
-                                      if row.get('executor_id')==actor],
-                "delivery_reviews": self._delivery_reviews(state, task, [c for c in permitted if
-                    actor in {c["origin"], task["receiver"]} or self.is_admin(actor) or rules.system_admin(state, actor)]),
-                "handoffs": self.handoffs(state, task) if any(c["origin"] == actor and c["L"] == "active"
-                                                          for c in claims) or actor == task["receiver"] or admin else [],
-                "qualification": self.qualification(state, task, actor)}
+        return task_views.task_view(self, state, task, actor)
 
     def qualification(self, state, task, actor):
         with delegation.operation_context(state, actor, "claim", rules.task_project(task), task["task_id"]):
             return self._qualification(state, task, actor)
 
     def _qualification(self, state, task, actor):
-        if not rules.enabled(state):
-            return None
-        missing, preferred = rules.eligible(state, task, actor, time.time())
-        gate = (rules.contract(task) or {}).get("gate")
-        if state["pilot"]["format"]["maintenance"]:
-            missing.append("服务维护中")
-        if gate:
-            release = state["pilot"].get("release:" + gate, {})
-            if release.get("status") == "closed":
-                try:
-                    rules.verify_report(state, json.loads(checked_file(self.desk.store, release["evidence"])), gate)
-                except (KeyError, ValueError, OSError, Rejected):
-                    missing.append("升级收口证据待复核")
-        result = {"eligible": not missing, "missing": missing, "preferred": preferred}
-        if round_service.enabled(state):
-            from 协作本轮 import policy, target_match
-            mode = policy(task)["mode"]
-            result.update(mode=mode, prioritized=mode == "prefer" and target_match(state, task, actor, time.time()))
-        return result
+        return task_views.qualification(self, state, task, actor)
 
     def detail(self, state, task, actor):
-        view = self.task_view(state, task, actor)
-        current = active_claim(state, task)
-        participant = view["claims"] or actor == task["receiver"] or self.is_admin(actor)
-        deliveries = []
-        for claim in view["claims"]:
-            for revision in claim["deliveries"].values():
-                ref = revision["manifest"]
-                try:
-                    outputs = self.delivery_refs(ref)
-                except (OSError, ValueError, KeyError, TypeError):
-                    outputs = []
-                review = state["acceptances"].get(revision.get("acceptance_id"))
-                deliveries.append({"claim_id": claim["claim_id"], "revision": revision, "outputs": outputs,
-                                   "review": review})
-        return {**view, "active": current if current in view["claims"] else None,
-                "roles": self.task_roles(state, task, actor) if rules.contract(task) else self.roles(state, actor),
-                "direct_roles": self.independent_roles(state, task, actor) if rules.contract(task) else self.roles(state, actor),
-                "delegated_actions": self.delegated_actions(state, task, actor),
-                "deliveries": deliveries,
-                "window": (rules.identity(state, current["origin"]) or {}).get("window") if current else None,
-                "window_name": (rules.identity(state, current["origin"]) or {}).get("window_name") if current else None,
-                "window_id": current["origin"] if current else None,
-                "round": round_service.enabled(state),
-                "items": [item for item in state["items"].values()
-                          if participant and item["source_task"] == task["task_id"]],
-                "close": state["closings"].get(task.get("close_id")) if participant else None,
-                "cancel_note": next((note for note in state["notes"].values() if participant and
-                                     note["related"] == {"task_id": task["task_id"], "kind": "cancel"}), None)}
+        return task_views.detail(self, state, task, actor)
 
     def members(self, state, project):
-        return [{"identity": key.rsplit(":", 1)[1], **record,
-                 "kind": (rules.identity(state, key.rsplit(":", 1)[1]) or {}).get("kind"),
-                 "window_name": (rules.identity(state, key.rsplit(":", 1)[1]) or {}).get("window_name"),
-                 "window": (rules.identity(state, key.rsplit(":", 1)[1]) or {}).get("window")}
-                for key, record in state["pilot"].items() if key.startswith(f"grant:{project}:")]
+        return task_views.members(self, state, project)
 
     def capability_rows(self, state, actor, name):
-        """Return whether the actor may look at a subject's capability records, and the records it may see."""
-        owner = rules.responsible(state, name)
-        allowed_projects = {p["id"] for p in upgrade.projects(state, actor)
-                            if {"manager", "receiver"} & set(p["roles"]) and rules.grant(state, p["id"], name)["roles"]}
-        permitted = actor in {name, owner} or self.is_admin(actor)
-        rows = []
-        for key, record in state["pilot"].items():
-            if key.startswith("cap:"):
-                _, project, subject, cap_id = key.split(":")
-                if subject == name and (permitted or project in allowed_projects):
-                    rows.append({"id": cap_id, "project_id": project, **record})
-        return permitted or bool(allowed_projects), rows
+        return task_views.capability_rows(self, state, actor, name)
 
     def feedback_due(self, state, actor, project=None):
-        return sum(1 for key, record in state["round"].items()
-                   if key.partition(":")[0] == "feedback" and record["status"] in {"triage", "review"}
-                   and (not project or record["project_id"] == project)
-                   and rules.manager(state, record["project_id"], actor))
+        return task_views.feedback_due(self, state, actor, project)
 
     @staticmethod
     def task_summary(task):
-        result={k:task[k] for k in ('task_id','title','status','stage','version','scope_version','priority',
-                    'project_name','qualification','holder','holder_window','holder_window_name','receiver') if k in task}
-        result['project_id']=rules.task_project(task)
-        return result
+        return task_views.task_summary(task)
+
+    def checked_file(self, ref):
+        """Read a stored file by reference; the views and read routes come through here."""
+        return checked_file(self.desk.store, ref)
 
     def read(self, actor, route, argument=None):
         with self.lock:
-            snap = self.snapshot()
-            state = snap["state"]
-            list_full = security_schema(state)<5
-            if route in {'tasks','task-options'} and isinstance(argument,dict):
-                list_full = argument.get('full') == '1'
-                argument = argument.get('project')
-            tasks = state["tasks"]
-            upgraded = rules.enabled(state)
-            visible_tasks = [task for task in tasks.values() if self.visible(state, task, actor)]
-            round_enabled = round_service.enabled(state)
-            from . import execution
-            if route == 'features':
-                from .input_packages import BUDGET
-                result=execution.features(state)
-                result.update(api_protocol=1,input_download=dict(BUDGET))
-                result.setdefault('features',{})['input-package']=True
-                result['features']['list-summary']=True
-                return result
-            if route == 'execution':
-                return execution.read(state, actor, argument)
-            if route == "window-impact":
-                from . import window_admin
-                return window_admin.view(state, actor, argument)
-            if route == "capability-requests":
-                from . import window_admin
-                return window_admin.requests_view(state, actor)
-            if route == "cleanup":
-                return {"claims": [{"claim_id": c["claim_id"], "task_id": c["task_id"], "epoch": c["epoch"],
-                                    "W": {"scope": c["W"]["scope"]}, "origin": actor, "L": c["L"]}
-                                   for c in state["claims"].values() if c["origin"] == actor and c["L"] == "active"]}
-            if round_enabled and route == "invitations":
-                return round_service.invitations(state, actor)
-            if round_enabled and route == "runner":
-                contacts = self.notices.contacts()
-                return {"settings": round_service.execution_settings(state, actor), "last_contact": contacts.get(actor),
-                        "load": rules.execution_load(state, actor),
-                        "automation": {p["id"]: state["round"].get("automation:" + p["id"], {"enabled": False, "version": 0})
-                                       for p in upgrade.projects(state, actor)}}
-            if round_enabled and route == "notices":
-                rows = self.db.execute("SELECT event_id,task,attempts,sent,ack FROM round_notices WHERE actor=? ORDER BY seq DESC LIMIT 100",
-                                       (actor,))
-                return {"notices": [{"event_id": event, "task_id": task, "attempts": attempts, "sent": sent,
-                                     "acknowledged": ack} for event, task, attempts, sent, ack in rows
-                                    if task in tasks and self.visible(state, tasks[task], actor)]}
-            if round_enabled and route == "collaboration":
-                from .round_projects import view
-                return view(state, actor, argument)
-            if route == "sheet":
-                if argument not in tasks:
-                    raise ClientError("任务不存在", 404)
-                task = tasks[argument]
-                view = self.detail(state, task, actor)
-                brief = next((checked_file(self.desk.store, {"path": path, "sha256": sha}).decode("utf-8")
-                              for path, sha in task["inputs"].items() if path.endswith("/brief.md")), "")
-                return {"view": view, "brief": brief, "events": upgrade.audit_rows(self, snap, actor, {"task": argument})}
-            if route == "tasks":
-                available = []
-                for task in visible_tasks:
-                    if task["status"] != "available" or argument and rules.task_project(task) != argument:
-                        continue
-                    if upgraded:
-                        qualified = self.qualification(state, task, actor)
-                        if not qualified["eligible"]:
-                            continue
-                        task = {**task, "qualification": qualified}
-                    available.append(task)
-                if round_enabled:
-                    available.sort(key=lambda task: (not task["qualification"]["prioritized"], -task["priority"], task["created_seq"]))
-                if not list_full:
-                    available=[self.task_summary(task) for task in available]
-                return {"repo_id": self.desk.meta["repo_id"], "head": snap["head"], "tasks": available, 'summary':not list_full}
-            if route == "task-options":
-                from collections import Counter
-                overview = self.read(actor, "overview", argument)
-                rows = overview["tasks"]
-                reasons = Counter(reason for task in rows for reason in task["qualification"]["missing"])
-                hints = {}
-                for task in rows:
-                    spec = rules.contract(task) or {}
-                    for requirement in spec.get("requirements", []):
-                        hint = {"project_id": rules.task_project(task), **requirement}
-                        hints[encoded(hint)] = hint
-                return {"tasks": rows if list_full else [self.task_summary(task) for task in rows], 'summary':not list_full,
-                        "counts": {"visible": len(rows),
-                        "claimable": sum(task["qualification"]["eligible"] for task in rows)},
-                        "missing_summary": [{"reason": reason, "count": count} for reason, count in sorted(reasons.items())],
-                        "capability_hints": sorted(hints.values(), key=lambda row: (row["project_id"], row["id"])),
-                        "load": rules.execution_load(state, actor)}
-            if route == "overview":
-                shown = []
-                for task in visible_tasks:
-                    if argument and rules.task_project(task) != argument:
-                        continue
-                    current = active_claim(state, task)
-                    project = rules.project_record(state, rules.task_project(task))
-                    last = next((state["claims"][cid] for cid in reversed(task["claims"])
-                                 if cid in state["claims"] and state["claims"][cid].get("task_id") == task["task_id"]), None)
-                    last_identity = (rules.identity(state, last["origin"]) or {}) if last else {}
-                    shown.append({**task, "stage": stage(task, current, state),
-                                  'execution_status':execution_status(state,current),
-                                  "project_name": project["name"] if project else None,
-                                  "window": (rules.identity(state, current["origin"]) or {}).get("window") if current else None,
-                                  "window_name": (rules.identity(state, current["origin"]) or {}).get("window_name") if current else None,
-                                  "holder": current["origin"] if current else None,
-                                  "last_executor": {"id": last["origin"], "window": last_identity.get("window"),
-                                                    "window_name": last_identity.get("window_name")} if last else None,
-                                  "last_claim_id": last["claim_id"] if last else None,
-                                  "revisions": len(current["deliveries"]) if current else 0,
-                                  "qualification": self.qualification(state, task, actor)})
-                return {"roles": self.roles(state, actor), "upgraded": upgraded,
-                        "projects": upgrade.projects(state, actor), "tasks": shown, "round": round_enabled,
-                        "feedback_due": self.feedback_due(state, actor, argument) if round_enabled else 0}
-            if route == "activity":
-                return upgrade.activity_rows(self, snap, actor)
-            if route == "project-cards":
-                return [{**project, "members": self.members(state, project["id"])} for project in upgrade.projects(state, actor)]
-            if route == "project":
-                project = next((p for p in upgrade.projects(state, actor) if p["id"] == argument), None)
-                if not project:
-                    raise ClientError("项目不存在或无权查看", 404)
-                from .release_views import identities
-                return {**project, "members": self.members(state, argument), "identity_choices":identities(state,actor),
-                        "automation": state["round"].get("automation:" + argument, {"enabled": False, "version": 0}) if round_enabled else None}
-            if route == "projects":
-                return {"projects": upgrade.projects(state, actor)}
-            if route == 'input-package':
-                from .input_packages import package
-                return package(self,actor,state,argument)
-            if route == "invitation-owners":
-                from .release_views import invitation_owners
-                return {"owners":invitation_owners(state,actor,argument)}
-            if route == "release-readiness":
-                from .release_views import readiness
-                from .privacy import public
-                return public(readiness(state,actor))
-            if route == "project-capabilities":
-                if not any(p["id"] == argument for p in upgrade.projects(state, actor)):
-                    raise ClientError("项目不存在或无权查看", 404)
-                found = {}
-                for key, record in state["pilot"].items():
-                    if key.startswith(f"cap:{argument}:"):
-                        found.setdefault(key.rsplit(":", 1)[1], record["kind"])
-                return sorted(found.items())
-            if route in {"executors", "window-cards"}:
-                sources = upgrade.sources(state, actor)
-                if round_enabled:
-                    round_service.annotate_sources(self, state, sources)
-                from .window_admin import allowed
-                from .privacy import window_source
-                sources=[window_source(state,actor,source) for source in sources]
-                for source in sources:
-                    source['can_manage']=allowed(state,actor,source['executor_id'])
-                    source['can_manage_projects']=rules.system_admin(state,actor)
-                if route == "window-cards":
-                    from 协作本轮 import execution_settings
-                    joined = upgrade.projects(state, actor)
-                    for source in sources:
-                        name = source["executor_id"]
-                        source.update(auto=execution_settings(state, name)["auto"], capabilities=self.capability_rows(state, actor, name)[1],
-                                      memberships=[{"name": p["name"], "roles": sorted(rules.grant(state, p["id"], name)["roles"])}
-                                                   for p in joined if rules.grant(state, p["id"], name)["roles"]])
-                return {"executors": sources}
-            if route == "identity":
-                data=state.get('security',{}).get('execution',{})
-                return {"identity": actor, "binding": rules.identity(state, actor), "projects": upgrade.projects(state, actor),
-                        'default_context':data.get('defaults',{}).get(actor),
-                        'active_task_contexts':[{'segment_id':key,**{k:row.get(k) for k in ('task_id','claim_id','context_id','context_version')}}
-                            for key,row in data.get('segments',{}).items() if row.get('executor_id')==actor and
-                            state['claims'].get(row.get('claim_id'),{}).get('L')=='active']}
-            if route == "delegations":
-                return {"delegations": delegation.view(state, actor)}
-            if route == "capabilities":
-                name = argument or actor
-                permitted, capabilities = self.capability_rows(state, actor, name)
-                if not permitted:
-                    raise ClientError("无权查看能力证据", 403)
-                return {"identity": name, "capabilities": capabilities}
-            if route == "audit":
-                return {"head": snap["head"], "events": upgrade.audit_rows(self, snap, actor, argument)}
-            if route == "receipt":
-                if not isinstance(argument, str) or not ID.fullmatch(argument):
-                    raise ClientError("请求编号无效")
-                key = digest(encoded([actor, argument]))
-                row = self.db.execute("SELECT status,response FROM requests WHERE key=?", (key,)).fetchone()
-                if not row:
-                    raise ClientError("没有该身份的请求记录", 404)
-                access = self.receipt_authorization(actor, key, state)
-                response = json.loads(row[1]) if row[1] else {"status": "pending", "request_id": argument}
-                return self.cleanup_receipt(response) if access == "cleanup" else response
-            if route == "upgrade":
-                fmt = state["pilot"].get("format")
-                return {"format": fmt, "release": state["pilot"].get("release:" + fmt["upgrade"]) if fmt else None,
-                        "roles": sorted(rules.roles(state, rules.PROJECT, actor)), "head": snap["head"]}
-            if route == "receivers":
-                if argument:
-                    return sorted(name for name in state["origins"] if "receiver" in rules.roles(state, argument, name))
-                return sorted(name for name, origin in state["origins"].items() if "receiver" in origin["roles"])
-            if route == "account-table":
-                if not self.is_admin(actor):
-                    raise ClientError("仅管理员可查看账号", 403)
-                joined = upgrade.projects(state, actor)
-                rows, seen = [], set()
-                for key, subject in state["pilot"].items():
-                    if not key.startswith("identity:"):
-                        continue
-                    name = key.removeprefix("identity:")
-                    seen.add(name)
-                    if subject["kind"] not in {"human", "executor"}:
-                        continue
-                    rows.append({"name": name, "kind": subject["kind"], "status": subject["status"], "owner": subject.get("owner"),
-                                 "platform": subject.get("platform"), "window": subject.get("window"), "admin": rules.system_admin(state, name),
-                                 "window_name": subject.get("window_name"),
-                                 "projects": [{"name": p["name"], "roles": sorted(rules.grant(state, p["id"], name)["roles"])}
-                                              for p in joined if rules.grant(state, p["id"], name)["roles"]]})
-                rows.sort(key=lambda row: (row["kind"] != "human", row["name"]))
-                return rows + [{"name": name, "kind": None, "status": None, "owner": None, "platform": None, "window": None, "admin": False, "projects": []}
-                               for name, _ in self.accounts.list() if name not in seen]
-            if route == "accounts":
-                if not self.is_admin(actor):
-                    raise ClientError("仅管理员可查看账号", 403)
-                roster = {name: role for name, role in self.accounts.list()}
-                for name, origin in state["origins"].items():
-                    role = origin["roles"][0]
-                    if role in {"receiver", "executor"}:
-                        roster.setdefault(name, role)
-                return sorted(roster.items())
-            if route == "detail":
-                if argument not in tasks:
-                    raise ClientError("任务不存在", 404)
-                return self.detail(state, tasks[argument], actor)
-            if route == "task":
-                if argument not in tasks:
-                    raise ClientError("任务不存在", 404)
-                return self.task_view(state, tasks[argument], actor)
-            if route == "board":
-                if upgraded:
-                    lines = ["# 内网任务看板", "", f"账本序号 {snap['head']}", ""]
-                    for task in visible_tasks:
-                        project = rules.project_record(state, rules.task_project(task))
-                        name = project["name"] if project else "原有任务"
-                        current = active_claim(state, task)
-                        subject = (rules.identity(state, current["origin"]) or {}) if current else {}
-                        window = subject.get("window_name") or subject.get("window")
-                        if subject.get("window_name") and subject.get("window"):
-                            window += " · " + subject["window"]
-                        lines.append(f"- {task['task_id']} {task['title']} · {name} · {stage(task, current, state)}"
-                                     + (f" · {window}" if window else ""))
-                    return ("\n".join(lines) + "\n").encode("utf-8")
-                return render(self.desk, snap)
-            if route == 'artifact' and execution.stash_reference_allowed(state,actor,argument):
-                row=next(row for row in state['security']['execution']['stashes'].values()
-                         if row.get('bundle',{}).get('path')==argument)
-                return checked_file(self.desk.store,row['bundle'])
-            for task in visible_tasks:
-                view = self.task_view(state, task, actor)
-                refs = [{"path": p, "sha256": sha} for p, sha in task["inputs"].items()] + view["handoffs"]
-                close = state["closings"].get(task.get("close_id"))
-                if close and (view["claims"] or actor == task["receiver"]):
-                    refs.append(close["summary"])
-                for claim in view["claims"]:
-                    refs += [{'path': p, 'sha256': sha} for p, sha in claim.get('inputs', {}).items()]
-                    for delivery in claim["deliveries"].values():
-                        ref = delivery["manifest"]
-                        if argument == ref["path"]:
-                            refs.append(ref)
-                        elif argument.startswith(ref["path"].rsplit("/", 1)[0] + "/"):
-                            refs += self.delivery_refs(ref)
-                for ref in refs:
-                    if argument == ref["path"]:
-                        return checked_file(self.desk.store, ref)
-            raise ClientError("文件不存在或当前身份无权读取", 404)
+            return reads.read(self, self.snapshot(), actor, route, argument)
