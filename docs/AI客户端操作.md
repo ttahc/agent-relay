@@ -34,7 +34,7 @@ Windows PowerShell 使用相同参数：
 
 `whoami` 只读取当前凭据对应的 `identity`，显示平台登记的 `window_name`、窗口编号 `window`、`executor_id`、责任人 `owner` 与可见项目 `projects`。`name_source=platform-registration`、`chat_title_auto_detected=false` 表明名称来自平台登记；客户端不会自动读取 Claude、Codex 等应用的真实聊天标题。标题改变后，如需同步平台名称，请明确执行 `rename`。
 
-安全语义 5 的服务还返回 `default_context` 与 `active_task_contexts`：默认执行配置和各活动任务实际绑定的配置。切换默认配置不会改写旧执行段。普通模型／环境变化用下节 `context save`；`sync --model ... --environment ...` 在语义 5 也会新建配置版本，不修改稳定窗口来源平台。来源登记错误须由有权人员单独更正。
+安全语义 5 的服务还返回 `default_context` 与 `active_task_contexts`：默认执行配置和各活动任务实际绑定的配置。切换默认配置不会改写旧执行段。平台和描述文字不是物理环境标识；如管理员已登记环境，可用 `context save --environment-id <环境编号>` 为新配置选择实际实例，目录互斥由受信映射决定，见 [执行环境与资源映射](执行环境与资源映射.md)。普通模型／环境变化用下节 `context save`；`sync --model ... --environment ...` 在语义 5 也会新建配置版本，不修改稳定窗口来源平台。来源登记错误须由有权人员单独更正。
 
 `rename` 沿用原窗口、凭据和当前登记的 session、model、environment，只通过 `executor-sync` 修改 window_name，不重新登记或变更责任人。丢响应时保留原请求，可运行 `pending`、`retry` 或重复相同 `rename`；不要创建新凭据文件来改名。
 
@@ -93,7 +93,7 @@ python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential downloa
 ```sh
 python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential execution
 python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential context list
-python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential context save --platform codex --adapter manual --model unknown --reasoning unknown --tools-version unknown --permissions-version unknown --environment '<实际环境ID>' --make-default
+python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential context save --platform codex --adapter manual --model unknown --reasoning unknown --tools-version unknown --permissions-version unknown --environment '<实际环境描述>' --make-default
 python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential claim T1001 --context-id <配置ID> --context-version <版本>
 python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential segment open T1001 --claim-id <领取号> --context-id <配置ID> --context-version <版本>
 python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential action prepare <段ID> --description '<本次实际动作>' --adapter-id manual --domain '<明确主机或共享存储域>' --write 'path:<合同上界内路径>'

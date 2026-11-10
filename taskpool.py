@@ -141,6 +141,10 @@ def build_parser():
     control.add_argument("--timeout", type=float, default=30)
     control.add_argument("--archive", help="backup：当前服务用户可写的私有备份绝对目录")
     control.add_argument("--tag", help="backup：不覆盖现有快照的唯一名称")
+    for operation in ("environment-save", "resource-map-save", "storage-domain-register", "storage-domain-merge"):
+        registry = commands.add_parser(operation, help="停服后由本机管理员登记执行环境或核实物理目录映射")
+        registry.add_argument("--request-id", required=True)
+        registry.add_argument("--config", type=Path, required=True, help="该操作的完整 JSON 字段（不含 request_id）")
     serve = commands.add_parser("serve", help="启动回环服务或显式启用局域网 TLS")
     serve.add_argument("--port", type=int, default=8765)
     serve.add_argument("--lan-name", help="局域网 TLS 证书中的稳定主机名")
@@ -305,6 +309,15 @@ def run_with_service(args, service, config, store):
     state = service.snapshot()["state"]
     if any(role not in state["origins"].get(name, {}).get("roles", []) for name, role in config["roles"].items()):
         raise Unavailable("身份登记未完成，请重跑 init")
+    if args.action in {"environment-save", "resource-map-save", "storage-domain-register", "storage-domain-merge"}:
+        from pool.packages import strict_json
+        body = strict_json(args.config.read_bytes())
+        if not isinstance(body, dict) or "request_id" in body:
+            raise ClientError("配置须为不含 request_id 的 JSON 对象")
+        body["request_id"] = args.request_id
+        status, result = service.submit(ADMIN, args.action, args.request_id, body)
+        emit(result)
+        return 0 if status == 200 else 1
     if args.action == "add-task":
         return add_task(args, service, config)
     if args.action == "init-admin":

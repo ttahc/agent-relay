@@ -216,7 +216,7 @@ class InviteLinks(unittest.TestCase):
         raw = build.client_bundle_bytes()
         with zipfile.ZipFile(BytesIO(raw)) as archive:
             self.assertEqual(set(archive.namelist()), {"ops/round-client.py", "ops/round-client.ps1", "README.md",
-                                                     "docs/AI客户端操作.md", "client-version.json", "LICENSE"})
+                                                     "docs/AI客户端操作.md", "docs/执行环境与资源映射.md", "client-version.json", "LICENSE"})
             self.assertEqual(archive.read("README.md"), archive.read("docs/AI客户端操作.md"))
             self.assertEqual(json.loads(archive.read("client-version.json"))["purpose"], "ai-window-client")
             ast.parse(archive.read("ops/round-client.py"), feature_version=(3, 11))
