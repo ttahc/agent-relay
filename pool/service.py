@@ -385,7 +385,8 @@ class Service:
         content_sha = digest(encoded(env))
         terminal = snap["control"]["terminal"].get(event_key)
         if not terminal:
-            present = any(r["sha256"] == content_sha for r in self.desk.copies())
+            digests = getattr(self.desk, "copy_digests", None)  # the incremental backends verify without copying
+            present = content_sha in digests() if digests else any(r["sha256"] == content_sha for r in self.desk.copies())
             if not present:
                 if "file" in instruction:
                     path, raw = instruction["file"]
