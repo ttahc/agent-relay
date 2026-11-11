@@ -57,8 +57,14 @@ def features(r, argument):
     if r.round_enabled:
         result['features']['wait'] = True
         result['features']['window-apply'] = True
+        result['features']['attention'] = True
         result['wait'] = {'max_seconds': wakeups.MAX_HOLD}
     return result
+
+
+def attention(r, argument):
+    from .attention import view
+    return view(r.service, r.snap, r.actor)
 
 
 def openapi(r, argument):
@@ -177,6 +183,11 @@ def task_options(r, argument):
 def overview(r, argument):
     service, state, actor = r.service, r.state, r.actor
     shown = []
+    from .attention import describe, reminders
+    reminded = {}
+    if r.round_enabled:
+        for row in reminders(service, state, r.snap.get("entries", []), actor):
+            reminded.setdefault(row["task_id"], []).append({"type": row["type"], "key": row["key"], "message": describe(row)})
     for task in r.visible_tasks:
         if argument and rules.task_project(task) != argument:
             continue
@@ -201,6 +212,7 @@ def overview(r, argument):
                                         "window_name": last_identity.get("window_name")} if last else None,
                       "last_claim_id": last["claim_id"] if last else None,
                       "revisions": len(current["deliveries"]) if current else 0,
+                      "reminders": reminded.get(task["task_id"], []),
                       "qualification": service.qualification(state, task, actor)})
     return {"roles": service.roles(state, actor), "upgraded": r.upgraded,
             "projects": upgrade.projects(state, actor), "tasks": shown, "round": r.round_enabled,
@@ -433,7 +445,7 @@ def stored_file(r, argument):
 
 
 ROUTES = {
-    "features": features, "openapi": openapi, "execution": execution_view, "post-completion": post_completion, "communication": communication, "window-impact": window_impact,
+    "features": features, "openapi": openapi, "attention": attention, "execution": execution_view, "post-completion": post_completion, "communication": communication, "window-impact": window_impact,
     "capability-requests": capability_requests, "cleanup": cleanup, "invitations": invitations, "runner": runner,
     "notices": notices, "collaboration": collaboration, "sheet": sheet, "tasks": tasks, "task-options": task_options,
     "overview": overview, "activity": activity, "project-cards": project_cards, "project": project,
@@ -444,7 +456,7 @@ ROUTES = {
     "account-table": account_table, "accounts": accounts, "detail": detail, "task": task, "board": board,
     "artifact": stash_artifact,
 }
-ROUND_ONLY = {"invitations", "runner", "notices", "collaboration"}
+ROUND_ONLY = {"invitations", "runner", "notices", "collaboration", "attention"}
 
 
 def read(service, snap, actor, route, argument=None):

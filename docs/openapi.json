@@ -559,6 +559,35 @@
         ]
       }
     },
+    "/v1/attention": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "读取 attention",
+        "tags": [
+          "read"
+        ],
+        "x-round-only": true
+      }
+    },
     "/v1/audit": {
       "get": {
         "parameters": [

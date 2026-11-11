@@ -1932,6 +1932,7 @@ def build_parser():
     feedback_update.add_argument("--limits")
     delegates = commands.add_parser("delegations", help="查看当前窗口的委托范围、期限与状态")
     delegates.add_argument("--project")
+    commands.add_parser("attention", help="查看需要你处理的超时与失联提醒：久无人领取、心跳中断、领取后久无进展；只读")
     commands.add_parser("nodes", help="查看可见的执行环境、平台和窗口，以及各自的在线与任务情况")
     board = commands.add_parser("board", help="读取 Markdown 看板")
     board.add_argument("--output", type=Path)
@@ -2108,6 +2109,7 @@ SERVICE_COMMANDS = {
     "delegations": lambda state, api, args: delegation_records(state, api, args),
     "board": lambda state, api, args: read_board(state, api, args),
     "nodes": lambda state, api, args: api.call("nodes", state.data["token"]),
+    "attention": lambda state, api, args: api.call("attention", state.data["token"]),
     "retry": lambda state, api, args: durable_write(state, api),
     "poll": lambda state, api, args: poll(state, api),
     "configure": lambda state, api, args: configure_runner(state, api, args),

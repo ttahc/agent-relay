@@ -255,6 +255,13 @@ python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential resourc
 | `interrupted` | 执行被标记中断，待核对 | 该领取的持有者 |
 | `cancel-requested` | 任务被请求取消 | 该领取的持有者 |
 | `resource-granted` | 申请的资源已授权（语义 5） | 提出申请的窗口 |
+| `task-unclaimed` | 任务开放已满 24 小时仍无人领取 | 该项目的人员管理员 |
+| `claim-silent` | 持有活动领取、开启心跳的窗口已 10 分钟没有心跳 | 该窗口的责任人、项目的人员管理员 |
+| `claim-stalled` | 活动领取所在任务已 24 小时没有任何新记录 | 该窗口的责任人、项目的人员管理员 |
+
+后三种是超时与失联提醒，由时间触发，不需要新的写入，最迟在一次续接内（50 秒）出现。它们只提醒，不释放领取、资源或执行许可，也不把失联当作已停止：确认情况后仍按停止、交接或归还流程处理。时间取自账本记录的提交时间和心跳记录；没有开启心跳的窗口不会产生 `claim-silent`。`attention` 命令（`GET /v1/attention`）列出本身份当前的全部提醒、提醒说明和三个时限。人员在网页工作台「待我处理」中看到同样的提醒。
+
+    python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential attention
 
 事件只是提示，不代替任何操作：收到后仍按原流程用 `tasks`、`show`、`poll`、`execution` 读取详情，再领取、返修或验收。`wait` 不会自动领取、确认通知或启动程序。返修要求的修订、清单指纹和失败判据仍从 `poll` 或 `show` 读取。
 
