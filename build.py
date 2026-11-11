@@ -23,7 +23,7 @@ FILES = [".gitignore", "LICENSE", "README.md", "build.py", "taskpool.py", "pool/
          "ops/Set-EasyTierIngress.ps1", "ops/verify-peer.py", "ops/round-client.py", "ops/round-client.ps1", "ops/round-local.sh",
          "ops/backup-store.py", "ops/safe-local-upgrade.sh", "ops/verify-release.py", "ops/launch-config.py", "ops/verify-backup.py",
          "ops/install-local-backup.sh", "ops/local-backup.sh", "ops/taskpool-local-backup.service", "ops/taskpool-local-backup.timer",
-         "docs/AI客户端操作.md", "docs/运维与升级.md", "docs/执行环境与资源映射.md", "docs/统一任务流程.md"]
+         "docs/AI客户端操作.md", "docs/运维与升级.md", "docs/执行环境与资源映射.md", "docs/统一任务流程.md", "docs/常开部署清单.md"]
 
 
 def bundle_bytes():
