@@ -350,10 +350,15 @@ def action_body(handler, action):
             if not line.strip():
                 continue
             parts = [part.strip() for part in line.split("|")]
-            if len(parts) != 5 or parts[3] not in {"必需", "优选"}:
-                raise ClientError("每行须填写五列领取能力要求")
-            key, kind, value, necessity, evidence = parts
-            rows.append({"id": key, "kind": kind, "value": value, "required": necessity == "必需", "evidence": evidence})
+            if len(parts) not in (5, 6) or parts[3] not in {"必需", "优选"}:
+                raise ClientError("能力要求须有五列，项目目录条目可附目录版本")
+            key, kind, value, necessity, evidence = parts[:5]
+            if len(parts) == 6:
+                if not re.fullmatch(r"[1-9][0-9]{0,9}", parts[5]):
+                    raise ClientError("目录版本无效，请重新选择项目能力")
+                rows.append({"id": key, "required": necessity == "必需", "definition_version": int(parts[5])})
+            else:
+                rows.append({"id": key, "kind": kind, "value": value, "required": necessity == "必需", "evidence": evidence})
         data["requirements"] = rows
         data["iteration"] = {"goal": data.pop("iteration_goal", ""),
                              "previous": split_items(data.pop("iteration_previous", "")),
@@ -370,6 +375,12 @@ def action_body(handler, action):
                             "automation": data.pop("dispatch_automation"), "owner": data.pop("dispatch_owner", "")}
     if action == "project-automation":
         data["enabled"] = data["enabled"] == "yes"
+    if action == "project-capability-save":
+        if data.get("active") not in ("yes", "no"):
+            raise ClientError("请选择启用或停用")
+        data["active"] = data["active"] == "yes"
+        for key in ("dimensions", "verified_dimensions"):
+            data[key] = split_items(data.get(key, ""))
     if action == "identity-bind" and data.get("kind") == "human":
         data["owner"] = data.get("owner") or data.get("name", "")
     if action == "executor-enroll":
@@ -408,7 +419,10 @@ def quick_registration(handler, data):
             choice = data.pop(key)
             if choice:
                 kind, level = choice.split(":", 1) if ":" in choice else ("", "")
-                rows.append(f"{key[4:]} | {kind} | * | 必需 | {level}")
+                if kind == "catalog":
+                    rows.append(f"{key[4:]} | catalog | * | 必需 | catalog | {level}")
+                else:
+                    rows.append(f"{key[4:]} | {kind} | * | 必需 | {level}")
     if new := data.pop("cap_new", "").strip():
         rows.append(f"{new} | skill | * | 必需 | declared")
     mode = data.get("dispatch_mode", "open")
@@ -491,7 +505,15 @@ def submit_action(handler, actor, action):
         if action.startswith("executor-"):
             return redirect("/executors")
         if action == "capability-save":
-            return redirect("/capabilities?" + urlencode({"identity": body["name"]}))
+            return redirect("/capabilities?" + urlencode({"identity": body.get("name", actor)}))
+        if action in {"project-capability-save", "capability-resolve"}:
+            project_id = body.get("project_id")
+            if project_id is None:
+                row = next((row for row in server.service.read(actor, "capability-requests")
+                            if row["id"] == body["verification_id"]), None)
+                project_id = row["project_id"] if row else None
+            if project_id:
+                return redirect("/projects/" + quote(project_id) + "?tab=capabilities")
         if action in {"identity-bind", "credential-change"}:
             return redirect("/accounts")
         if body.get("project_id"):
@@ -607,7 +629,14 @@ def upgrade_view(service, actor, target):
         tasks = service.read(actor, "overview", project["id"])["tasks"]
         if workspace:
             tab = parse_qs(target.query).get("tab", [""])[0]
-            return "项目", workbench_pages.project_page(actor, project, tasks, service.read(actor, "activity"), tab)
+            capability_section = ""
+            capabilities_enabled = service.read(actor, "features")["features"]["project-capabilities"]
+            if capabilities_enabled and tab == "capabilities":
+                from .project_capability_pages import section
+                capability_section = section(service.read(actor, "project-capability-catalog", project["id"]),
+                                             service.read(actor, "capability-requests"))
+            return "项目", workbench_pages.project_page(actor, project, tasks, service.read(actor, "activity"), tab,
+                                                         capability_section, capabilities_enabled)
         return "项目", upgrade_pages.project_page(actor, project, tasks)
     if path == "/executors" and workspace:
         from . import window_entries_pages
@@ -777,7 +806,8 @@ def new_task_page(handler, target, actor):
             receivers = service.read(actor, "receivers", project["id"]) if "manager" in project["roles"] else [actor]
             return html_page("新建任务 · 内网任务服务", workbench.new_task(
                 actor, allowed, project, receivers, service.read(actor, "project-capabilities", project["id"]),
-                service.read(actor, "project", project["id"])["members"], overview["tasks"]))
+                service.read(actor, "project", project["id"])["members"], overview["tasks"],
+                service.read(actor, "project-capability-catalog", project["id"])["definitions"]))
         allowed = [p for p in overview["projects"] if {"manager", "receiver"} & set(p["roles"]) and
                    (not query or p["id"] == query.get("project"))]
         if len(allowed) != 1:

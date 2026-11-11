@@ -8,7 +8,7 @@ import uuid
 
 SECRET_FIELDS = {'token', 'tokens', 'access_token', 'refresh_token', 'rotation_token', 'code', 'password', 'passwd',
     'current', 'confirm', 'recovery', 'secret', 'private_key', 'verifier', 'salt', 'proof_sha', 'token_sha',
-    'reset', 'reset_code', 'invitation_url', 'invite_url'}
+    'reset', 'reset_code', 'invitation_url', 'invite_url', 'token_sha256'}
 PATTERNS = (
     ('private-key', re.compile(r'-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----', re.S)),
     ('bearer', re.compile(r'(?i)(\bBearer\s+)[A-Za-z0-9._~+/-]{25,}')),

@@ -212,8 +212,13 @@ def contract_fields(project, spec=None, resources=None, dependencies=None, round
     creating = spec is None
     spec = spec or {"iteration": {"goal": "", "previous": [], "next": []}, "delivery": "",
                     "requirements": [], "review_mode": "source", "user_basis": ""}
-    requirements = "\n".join(" | ".join((r["id"], r["kind"], r["value"], "必需" if r["required"] else "优选", r["evidence"]))
-                             for r in spec["requirements"])
+    lines = []
+    for row in spec["requirements"]:
+        necessity = "必需" if row["required"] else "优选"
+        fields = ((row["id"], "catalog", "*", necessity, "catalog", str(row["definition_version"]))
+                  if "definition_version" in row else (row["id"], row["kind"], row["value"], necessity, row["evidence"]))
+        lines.append(" | ".join(fields))
+    requirements = "\n".join(lines)
     routing = ""
     if round_mode:
         selection_data = spec.get("dispatch", {"mode": "open", "subjects": [], "capabilities": [],
@@ -234,7 +239,7 @@ def contract_fields(project, spec=None, resources=None, dependencies=None, round
             + input_field("iteration_previous", "前序任务（逗号分隔）", ",".join(spec["iteration"]["previous"]), required=False)
             + input_field("iteration_next", "后续任务（逗号分隔）", ",".join(spec["iteration"]["next"]), required=False)
             + text_field("delivery", "交付物", spec["delivery"])
-            + text_field("requirements", "领取能力，每行填写 编号 | skill 或 environment | 值 | 必需或优选 | declared 或 verified",
+            + text_field("requirements", "领取能力，每行填写 编号 | 类别 | 值 | 必需或优选 | 等级，目录条目保留第六列版本",
                          requirements, 8000)
             + '<p class="muted">示例 markdown | skill | * | 必需 | declared</p>'
             + json_field("resources", "占用资源数组，无资源填 []", resources or [])

@@ -9,7 +9,7 @@ of the interface.
 import base64
 import time
 
-from . import delegation, execution, round_service, upgrade, window_admin, post_completion, task_communication
+from . import project_capabilities, delegation, execution, round_service, upgrade, window_admin, post_completion, task_communication
 from .constants import COMMITTER, COORDINATOR, step
 from .packages import (ClientError, MAX_PACKAGE, artifact_name, fields, integer, make_delivery, reference,
                        seal_metadata, string, unpack_delivery)
@@ -36,7 +36,7 @@ EXECUTION_OPTIONS = ('execution_protocol', 'context_id', 'context_version')
 def plan(service, actor, action, key, body, snap):
     state = snap["state"]
     generation = {"generation": state["generation"]}
-    for planner in (execution.plan, delegation.plan, window_admin.plan, post_completion.plan, task_communication.plan, round_service.plan):
+    for planner in (project_capabilities.plan, execution.plan, delegation.plan, window_admin.plan, post_completion.plan, task_communication.plan, round_service.plan):
         if prepared := planner(service, actor, action, key, body, state):
             return prepared
     if prepared := upgrade.plan(service, actor, action, key, body, snap):

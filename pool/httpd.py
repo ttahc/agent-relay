@@ -13,7 +13,7 @@ import time
 from threading import BoundedSemaphore, local
 from urllib.parse import parse_qs, urlsplit
 
-from . import round_service, round_web, web, window_entries
+from . import project_capabilities, round_service, round_web, web, window_entries
 from . import __version__
 from . import ROOT
 from .packages import ClientError, MAX_JSON, strict_json
@@ -56,6 +56,7 @@ READ_API = {
     "release-readiness": (None, None, JSON, False),
     "window-impact": ({"name"}, one_value("name"), JSON, False),
     "capability-requests": (None, None, JSON, False),
+    "project-capability-catalog": ({"project"}, one_value("project"), JSON, False),
     "tasks": ({"project", 'full'}, listing_query, JSON, False),
     "task-options": ({"project", 'full'}, listing_query, JSON, False),
     "board": (None, None, "text/markdown; charset=utf-8", False),
@@ -189,7 +190,7 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def send(self, status, data, kind="application/json; charset=utf-8", headers=()):
-        payload = encoded(data) if isinstance(data, dict) else data
+        payload = encoded(data) if isinstance(data, dict) or (kind == JSON and isinstance(data, list)) else data
         streaming = hasattr(payload, 'read') and hasattr(payload, 'seek')
         if streaming:
             payload.seek(0, 2)
@@ -294,6 +295,16 @@ class Handler(BaseHTTPRequestHandler):
         api_route = target.path[4:] if target.path.startswith("/v1/") and not (
             target.scheme or target.netloc or target.fragment or target.query
         ) else ""
+        if method == "POST" and api_route in project_capabilities.PROBE_WRITES:
+            body = self.request_json()
+
+            def authenticate_probe():
+                return project_capabilities.authenticate(service.snapshot()["state"], self.headers.get_all("Authorization", []))
+
+            with service.lock:
+                actor = authenticate_probe()
+                status, result = service.submit(actor, api_route, body.get("request_id"), body, authorize=authenticate_probe)
+            return status, result, JSON
         if self.server.is_round and method == "POST" and api_route in round_service.BOOTSTRAP:
             auth = self.headers.get_all("Authorization", [])
             scheme, _, token = auth[0].partition(" ") if len(auth) == 1 else ("", "", "")

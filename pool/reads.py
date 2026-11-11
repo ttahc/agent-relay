@@ -49,7 +49,10 @@ def features(r, argument):
     result.setdefault('features', {})['input-package'] = True
     result['features']['list-summary'] = True
     result['features'].update({'executor-complete': r.upgraded, 'post-completion': r.round_enabled, 'task-communication': r.round_enabled})
-    result['workflow'] = {'reader': 7, 'completion_policies': ['review-required', 'executor-direct']}
+    from 协作安全 import READER
+    from .project_capabilities import state_ready
+    result["features"]["project-capabilities"] = state_ready(r.state)
+    result['workflow'] = {'reader': READER, 'completion_policies': ['review-required', 'executor-direct']}
     if r.round_enabled:
         result['features']['wait'] = True
         result['features']['window-apply'] = True
@@ -242,6 +245,14 @@ def project_capabilities(r, argument):
     return sorted(found.items())
 
 
+def project_capability_catalog(r, argument):
+    from .project_capabilities import definitions, manage
+    if not any(p["id"] == argument for p in upgrade.projects(r.state, r.actor)):
+        raise ClientError("项目不存在或无权查看", 404)
+    return {"project_id": argument, "can_manage": manage(r.state, r.actor, argument),
+            "definitions": definitions(r.state, argument)}
+
+
 def executors(r, argument):
     service, state, actor = r.service, r.state, r.actor
     sources = upgrade.sources(state, actor)
@@ -421,7 +432,7 @@ ROUTES = {
     "notices": notices, "collaboration": collaboration, "sheet": sheet, "tasks": tasks, "task-options": task_options,
     "overview": overview, "activity": activity, "project-cards": project_cards, "project": project,
     "projects": projects, "input-package": input_package, "invitation-owners": invitation_owners,
-    "release-readiness": release_readiness, "project-capabilities": project_capabilities, "executors": executors,
+    "release-readiness": release_readiness, "project-capabilities": project_capabilities, "project-capability-catalog": project_capability_catalog, "executors": executors,
     "window-cards": executors, "nodes": executors, "identity": identity, "delegations": delegations, "capabilities": capabilities,
     "audit": audit, "receipt": receipt, "upgrade": upgrade_status, "receivers": receivers,
     "account-table": account_table, "accounts": accounts, "detail": detail, "task": task, "board": board,

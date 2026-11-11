@@ -231,8 +231,10 @@ def capability_action(state, p, actor, now, event_id):
 
 
 def requests_view(state, actor):
-    return [{**deepcopy(row), "reviewers": reviewers(state, row["project_id"], row["name"]),
-             "can_resolve": actor in reviewers(state, row["project_id"], row["name"])}
+    from .project_capabilities import status_at
+    now = time.time()
+    return [{**deepcopy(row), "state": status_at(row, now), "reviewers": reviewers(state, row["project_id"], row["name"]),
+             "can_resolve": row.get("method") != "probe" and actor in reviewers(state, row["project_id"], row["name"])}
             for key, row in state["round"].items() if key.startswith("verification:") and
             (actor == row["name"] or actor == rules.responsible(state, row["name"]) or
              actor in reviewers(state, row["project_id"], row["name"]))]

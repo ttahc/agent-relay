@@ -164,7 +164,7 @@ def requirement_rows(rows, contextual=False):
     output = []
     for row in rows:
         core={'id','kind','value','required','evidence'}
-        require(isinstance(row, dict) and core <= set(row) <= core | ({'dimensions','verified_dimensions','allow_unknown'} if contextual else set()),
+        require(isinstance(row, dict) and core <= set(row) <= core | ({'dimensions','verified_dimensions','allow_unknown','definition_version'} if contextual else set()),
                 "能力要求须填写标识、类别、值、必需性与证据级别")
         require(isinstance(row["id"], str) and CAP_ID.fullmatch(row["id"]) and
                 isinstance(row["kind"], str) and row["kind"] in {"skill", "environment"} and type(row["required"]) is bool and
@@ -284,7 +284,8 @@ def claim_execution_context(state, task, actor, now):
 
 
 def capability_matches(state, project, actor, requirement, now, execution_context=None):
-    record = state["pilot"].get(f"cap:{project}:{actor}:{requirement['id']}")
+    from pool.project_capabilities import applicable_record
+    record = applicable_record(state, project, actor, requirement)
     if state.get('security',{}).get('schema',0)>=5:
         from 协作执行 import match_context
         return bool(record and record['kind']==requirement['kind'] and
@@ -354,7 +355,19 @@ def eligible(state, task, actor, now, include_status=True, check_resources=True,
     subject = identity(state, actor) or {}
     for requirement in spec["requirements"]:
         if not capability_matches(state, project, actor, requirement, now, execution_context):
-            (missing if requirement["required"] else preferred).append("能力缺项 " + requirement["id"])
+            reason = "能力缺项 " + requirement["id"]
+            if "definition_version" in requirement:
+                from pool.project_capabilities import applicable_record
+                from 协作执行 import capability_check, default_context
+                record = applicable_record(state, project, actor, requirement)
+                if record:
+                    detail = ("证据已过期" if record["expires"] <= now else capability_check(
+                        state, actor, record, execution_context or default_context(state, actor),
+                        {**requirement, "project_id": project})["reason"])
+                    if record["expires"] > now and LEVEL[record["level"]] < LEVEL[requirement["evidence"]]:
+                        detail = "证据等级不足"
+                    reason += "：" + detail
+            (missing if requirement["required"] else preferred).append(reason)
     assigned = grant(state, project, actor)["resources"]
     if subject.get("kind") == "executor":
         owner_grant = grant(state, project, subject["owner"])
@@ -412,7 +425,9 @@ def task_spec(state, data, task_id=None):
     require(isinstance(data["delivery"], str) and 0 < len(data["delivery"].strip()) <= 2000, "须声明交付物")
     require(isinstance(data["review_mode"], str) and data["review_mode"] in MODES and isinstance(data["user_basis"], str) and
             (data["review_mode"] != "user" or 0 < len(data["user_basis"].strip()) <= 2000), "验收策略缺少明确依据")
-    spec = {**data, **({"completion_policy": policy} if "completion_policy" in data or task_id and policy == "executor-direct" else {}), "requirements": requirement_rows(data["requirements"],state.get('security',{}).get('schema',0)>=5),
+    from pool.project_capabilities import task_requirements
+    selected = task_requirements(state, project, data["requirements"], task_id)
+    spec = {**data, **({"completion_policy": policy} if "completion_policy" in data or task_id and policy == "executor-direct" else {}), "requirements": requirement_rows(selected, state.get("security", {}).get("schema", 0) >= 5),
             "iteration": iteration(state, data["iteration"], project, task_id)}
     if "dispatch" in spec:
         from 协作本轮 import task_policy
@@ -535,7 +550,8 @@ def action(state, env, context):
     require(enabled(state), "请先完成数据合同迁移")
     fmt = data["format"]
     from 协作本轮 import OPS, action as round_action
-    if op in OPS:
+    from pool.project_capabilities import OPS as CATALOG_OPS
+    if op in OPS or op in CATALOG_OPS:
         return round_action(state, env, context)
     task = state["tasks"].get(p.get("task_id"))
     project = p.get("project_id") or task_project(task)

@@ -325,7 +325,10 @@ def action(state, env, context):
     require(enabled(state), "请先迁移本轮数据合同")
     require(not fmt["maintenance"] or op == "password-event" and p["kind"] == "admin-recovery",
             "服务处于维护窗口")
-    if op in RECHECK_OPS:
+    from pool import project_capabilities
+    if op in project_capabilities.OPS:
+        project_capabilities.apply(state, p, actor, now, event_id)
+    elif op in RECHECK_OPS:
         from 协作复查 import action as recheck_action
         recheck_action(state, p, actor, now, event_id, context['seq'], context)
     elif op in COMMUNICATION_OPS:
