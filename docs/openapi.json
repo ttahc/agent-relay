@@ -1,0 +1,5595 @@
+{
+  "components": {
+    "parameters": {
+      "ReportedAt": {
+        "description": "带时区的 ISO 时间",
+        "in": "header",
+        "name": "X-TaskPool-Reported-At",
+        "required": false,
+        "schema": {
+          "maxLength": 40,
+          "type": "string"
+        }
+      }
+    },
+    "responses": {
+      "Rejected": {
+        "content": {
+          "application/json": {
+            "schema": {
+              "properties": {
+                "message": {
+                  "type": "string"
+                },
+                "status": {
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            }
+          }
+        },
+        "description": "拒绝或错误：JSON 对象，含 status 与 message"
+      }
+    },
+    "securitySchemes": {
+      "enrollmentToken": {
+        "description": "ai-prepare 回执中的待激活令牌",
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "inviteProof": {
+        "description": "邀请链接中的专用证明",
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "verifierToken": {
+        "description": "管理员登记的独立探测凭据，格式 <verifier_id>.<secret>",
+        "scheme": "bearer",
+        "type": "http"
+      },
+      "windowToken": {
+        "description": "已登记窗口或人员的令牌",
+        "scheme": "bearer",
+        "type": "http"
+      }
+    }
+  },
+  "info": {
+    "description": "由服务端路由表生成。带 x-round-only 的接口仅在账号密码登录模式（round）下提供；x-journaled 为 true 的写入有持久回执。请求体与响应体未逐项描述，以 docs/AI客户端操作.md 为准。",
+    "license": {
+      "identifier": "AGPL-3.0-only",
+      "name": "AGPL-3.0-only"
+    },
+    "title": "Agent Relay HTTP 接口",
+    "version": "0.5.1"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/healthz": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [],
+        "summary": "存活检查，仅局域网 TLS 模式提供",
+        "tags": [
+          "service"
+        ]
+      }
+    },
+    "/readyz": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [],
+        "summary": "是否可接收请求；维护阶段返回 503",
+        "tags": [
+          "service"
+        ]
+      }
+    },
+    "/v1/action-prepare": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "adapter_id": {},
+                  "description": {},
+                  "request_id": {
+                    "type": "string"
+                  },
+                  "resources": {},
+                  "segment_id": {},
+                  "supersedes_request_id": {},
+                  "version": {}
+                },
+                "required": [
+                  "adapter_id",
+                  "description",
+                  "request_id",
+                  "resources",
+                  "segment_id",
+                  "version"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 action-prepare（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/action-start": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "action_id": {},
+                  "generation": {},
+                  "grant_id": {},
+                  "request_id": {
+                    "type": "string"
+                  },
+                  "supersedes_request_id": {},
+                  "version": {}
+                },
+                "required": [
+                  "action_id",
+                  "generation",
+                  "grant_id",
+                  "request_id",
+                  "version"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 action-start（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/ai-activate": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "enrollmentToken": []
+          }
+        ],
+        "summary": "窗口接入 ai-activate",
+        "tags": [
+          "enrollment"
+        ],
+        "x-round-only": true
+      }
+    },
+    "/v1/ai-invite": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 ai-invite（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/ai-invite-info": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "invite_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "inviteProof": []
+          }
+        ],
+        "summary": "凭邀请链接中的证明读取邀请",
+        "tags": [
+          "enrollment"
+        ]
+      }
+    },
+    "/v1/ai-prepare": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [],
+        "summary": "窗口接入 ai-prepare",
+        "tags": [
+          "enrollment"
+        ],
+        "x-round-only": true
+      }
+    },
+    "/v1/ai-recover": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [],
+        "summary": "窗口接入 ai-recover",
+        "tags": [
+          "enrollment"
+        ],
+        "x-round-only": true
+      }
+    },
+    "/v1/ai-revoke": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 ai-revoke（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/artifact": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "读取一个有权查看的文件",
+        "tags": [
+          "read"
+        ]
+      }
+    },
+    "/v1/audit": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "actor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "request",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "task",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "读取 audit",
+        "tags": [
+          "read"
+        ]
+      }
+    },
+    "/v1/board": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "text/markdown; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "读取 board",
+        "tags": [
+          "read"
+        ]
+      }
+    },
+    "/v1/cancel": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 cancel（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/capabilities": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "identity",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "读取 capabilities",
+        "tags": [
+          "read"
+        ]
+      }
+    },
+    "/v1/capability-probe-claim": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "verifierToken": []
+          }
+        ],
+        "summary": "独立探测端写入 capability-probe-claim",
+        "tags": [
+          "probe"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/capability-probe-result": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "verifierToken": []
+          }
+        ],
+        "summary": "独立探测端写入 capability-probe-result",
+        "tags": [
+          "probe"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/capability-request": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 capability-request（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/capability-requests": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "读取 capability-requests",
+        "tags": [
+          "read"
+        ]
+      }
+    },
+    "/v1/capability-resolve": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 capability-resolve（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/capability-save": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 capability-save（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/change-finish": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 change-finish（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/change-open": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 change-open（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/claim": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 claim（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/cleanup": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "读取 cleanup",
+        "tags": [
+          "read"
+        ],
+        "x-round-only": true
+      }
+    },
+    "/v1/close": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 close（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/collaboration": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "读取 collaboration",
+        "tags": [
+          "read"
+        ],
+        "x-round-only": true
+      }
+    },
+    "/v1/communication": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "task_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "读取 communication",
+        "tags": [
+          "read"
+        ],
+        "x-round-only": true
+      }
+    },
+    "/v1/context-save": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "config": {},
+                  "context_id": {},
+                  "environment_id": {},
+                  "make_default": {},
+                  "request_id": {
+                    "type": "string"
+                  },
+                  "supersedes_request_id": {},
+                  "version": {}
+                },
+                "required": [
+                  "config",
+                  "context_id",
+                  "make_default",
+                  "request_id",
+                  "version"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 context-save（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/credential-change": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 credential-change（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/decision-save": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 decision-save（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/delegate-grant": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 delegate-grant（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/delegate-revoke": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 delegate-revoke（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/delegations": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "读取 delegations",
+        "tags": [
+          "read"
+        ],
+        "x-round-only": true
+      }
+    },
+    "/v1/deliver": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 deliver（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/deliver-files": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 deliver-files（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/environment-save": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "active": {},
+                  "environment_id": {},
+                  "executors": {},
+                  "kind": {},
+                  "label": {},
+                  "request_id": {
+                    "type": "string"
+                  },
+                  "supersedes_request_id": {},
+                  "version": {}
+                },
+                "required": [
+                  "active",
+                  "environment_id",
+                  "executors",
+                  "kind",
+                  "label",
+                  "request_id",
+                  "version"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 environment-save（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/evidence-stash": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "action_id": {},
+                  "claim_id": {},
+                  "epoch": {},
+                  "files": {},
+                  "reporter_basis": {},
+                  "request_id": {
+                    "type": "string"
+                  },
+                  "scope_version": {},
+                  "supersedes_request_id": {},
+                  "task_id": {}
+                },
+                "required": [
+                  "action_id",
+                  "claim_id",
+                  "epoch",
+                  "files",
+                  "reporter_basis",
+                  "request_id",
+                  "scope_version",
+                  "task_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 evidence-stash（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/execution": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "action_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "claim_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "executor_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "task_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "读取 execution",
+        "tags": [
+          "read"
+        ]
+      }
+    },
+    "/v1/execution-fact": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "action_id": {},
+                  "blocker_ids": {},
+                  "claim_id": {},
+                  "epoch": {},
+                  "evidence": {},
+                  "kind": {},
+                  "permit_id": {},
+                  "reporter_basis": {},
+                  "request_id": {
+                    "type": "string"
+                  },
+                  "scope_version": {},
+                  "supersedes_request_id": {},
+                  "task_id": {}
+                },
+                "required": [
+                  "action_id",
+                  "claim_id",
+                  "epoch",
+                  "evidence",
+                  "kind",
+                  "permit_id",
+                  "reporter_basis",
+                  "request_id",
+                  "scope_version",
+                  "task_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 execution-fact（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/executor-complete": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 executor-complete（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/executor-enroll": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 executor-enroll（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/executor-sync": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 executor-sync（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/executors": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "读取 executors",
+        "tags": [
+          "read"
+        ]
+      }
+    },
+    "/v1/experience-save": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "conditions": {},
+                  "evidence": {},
+                  "id": {},
+                  "limits": {},
+                  "method": {},
+                  "project_id": {},
+                  "request_id": {
+                    "type": "string"
+                  },
+                  "source_feedback": {},
+                  "source_feedback_version": {},
+                  "source_task": {},
+                  "source_task_version": {},
+                  "title": {},
+                  "version": {}
+                },
+                "required": [
+                  "conditions",
+                  "evidence",
+                  "id",
+                  "limits",
+                  "method",
+                  "project_id",
+                  "request_id",
+                  "source_feedback",
+                  "source_feedback_version",
+                  "source_task",
+                  "source_task_version",
+                  "title",
+                  "version"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 experience-save（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/experience-state": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "id": {},
+                  "project_id": {},
+                  "reason": {},
+                  "request_id": {
+                    "type": "string"
+                  },
+                  "state": {},
+                  "version": {}
+                },
+                "required": [
+                  "id",
+                  "project_id",
+                  "reason",
+                  "request_id",
+                  "state",
+                  "version"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 experience-state（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/features": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "读取 features",
+        "tags": [
+          "read"
+        ]
+      }
+    },
+    "/v1/feedback-move": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 feedback-move（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/feedback-save": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 feedback-save（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/feedback-update": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 feedback-update（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/handoff": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 handoff（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/identity": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "读取 identity",
+        "tags": [
+          "read"
+        ]
+      }
+    },
+    "/v1/identity-bind": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 identity-bind（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/input-package": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "claim_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope_version",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "task_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/zip": {
+                "schema": {
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "读取 input-package",
+        "tags": [
+          "read"
+        ]
+      }
+    },
+    "/v1/invitations": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "读取 invitations",
+        "tags": [
+          "read"
+        ],
+        "x-round-only": true
+      }
+    },
+    "/v1/nodes": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "读取 nodes",
+        "tags": [
+          "read"
+        ]
+      }
+    },
+    "/v1/notice-ack": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 notice-ack（不记入请求日志）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": false,
+        "x-round-only": true
+      }
+    },
+    "/v1/notice-retry": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 notice-retry（不记入请求日志）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": false,
+        "x-round-only": true
+      }
+    },
+    "/v1/notices": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "读取 notices",
+        "tags": [
+          "read"
+        ],
+        "x-round-only": true
+      }
+    },
+    "/v1/notices-poll": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 notices-poll（不记入请求日志）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": false,
+        "x-round-only": true
+      }
+    },
+    "/v1/openapi": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "读取 openapi",
+        "tags": [
+          "read"
+        ]
+      }
+    },
+    "/v1/person-invite": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 person-invite（不记入请求日志）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": false,
+        "x-round-only": true
+      }
+    },
+    "/v1/post-completion": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "task_id",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "读取 post-completion",
+        "tags": [
+          "read"
+        ],
+        "x-round-only": true
+      }
+    },
+    "/v1/project-automation": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 project-automation（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/project-capability-catalog": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "project",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "读取 project-capability-catalog",
+        "tags": [
+          "read"
+        ]
+      }
+    },
+    "/v1/project-capability-save": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 project-capability-save（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/project-grant": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 project-grant（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/project-save": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 project-save（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/projects": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "读取 projects",
+        "tags": [
+          "read"
+        ]
+      }
+    },
+    "/v1/projects/{project_id}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "project_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "读取单个 project",
+        "tags": [
+          "read"
+        ]
+      }
+    },
+    "/v1/receipt": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "request",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "读取 receipt",
+        "tags": [
+          "read"
+        ]
+      }
+    },
+    "/v1/register": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 register（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/release-accept": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 release-accept（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/release-close": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 release-close（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/release-correct": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 release-correct（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/release-readiness": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "读取 release-readiness",
+        "tags": [
+          "read"
+        ]
+      }
+    },
+    "/v1/resource-cancel": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  },
+                  "resource_request_id": {},
+                  "supersedes_request_id": {},
+                  "version": {}
+                },
+                "required": [
+                  "request_id",
+                  "resource_request_id",
+                  "version"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 resource-cancel（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/resource-map-save": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "active": {},
+                  "domain": {},
+                  "environment_id": {},
+                  "evidence": {},
+                  "mapping_kind": {},
+                  "request_id": {
+                    "type": "string"
+                  },
+                  "root": {},
+                  "storage_domain_id": {},
+                  "supersedes_request_id": {},
+                  "version": {}
+                },
+                "required": [
+                  "active",
+                  "domain",
+                  "environment_id",
+                  "request_id",
+                  "root",
+                  "version"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 resource-map-save（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/resource-release": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "action_id": {},
+                  "basis": {},
+                  "evidence": {},
+                  "generation": {},
+                  "grant_id": {},
+                  "request_id": {
+                    "type": "string"
+                  },
+                  "supersedes_request_id": {},
+                  "version": {}
+                },
+                "required": [
+                  "action_id",
+                  "basis",
+                  "evidence",
+                  "generation",
+                  "grant_id",
+                  "request_id",
+                  "version"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 resource-release（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/resource-request": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "action_id": {},
+                  "request_id": {
+                    "type": "string"
+                  },
+                  "resources": {},
+                  "supersedes_request_id": {},
+                  "version": {}
+                },
+                "required": [
+                  "action_id",
+                  "request_id",
+                  "resources",
+                  "version"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 resource-request（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/resume": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 resume（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/return": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 return（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/review": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 review（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/run-report": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 run-report（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/runner": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "读取 runner",
+        "tags": [
+          "read"
+        ],
+        "x-round-only": true
+      }
+    },
+    "/v1/runner-heartbeat": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 runner-heartbeat（不记入请求日志）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": false,
+        "x-round-only": true
+      }
+    },
+    "/v1/runner-settings": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 runner-settings（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/segment-open": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "claim_id": {},
+                  "context_id": {},
+                  "context_version": {},
+                  "epoch": {},
+                  "request_id": {
+                    "type": "string"
+                  },
+                  "scope_version": {},
+                  "supersedes_request_id": {},
+                  "task_id": {}
+                },
+                "required": [
+                  "claim_id",
+                  "context_id",
+                  "context_version",
+                  "epoch",
+                  "request_id",
+                  "scope_version",
+                  "task_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 segment-open（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/service-status": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "服务阶段",
+        "tags": [
+          "service"
+        ]
+      }
+    },
+    "/v1/stop": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 stop（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/storage-domain-merge": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "evidence": {},
+                  "other_domain_id": {},
+                  "request_id": {
+                    "type": "string"
+                  },
+                  "storage_domain_id": {},
+                  "supersedes_request_id": {},
+                  "version": {}
+                },
+                "required": [
+                  "evidence",
+                  "other_domain_id",
+                  "request_id",
+                  "storage_domain_id",
+                  "version"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 storage-domain-merge（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/storage-domain-register": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "evidence": {},
+                  "independent": {},
+                  "label": {},
+                  "request_id": {
+                    "type": "string"
+                  },
+                  "storage_domain_id": {},
+                  "supersedes_request_id": {}
+                },
+                "required": [
+                  "evidence",
+                  "independent",
+                  "label",
+                  "request_id",
+                  "storage_domain_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 storage-domain-register（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/task-hold": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 task-hold（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/task-interrupt": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 task-interrupt（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/task-issue-open": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 task-issue-open（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/task-issue-review": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 task-issue-review（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/task-message": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "content": {},
+                  "kind": {},
+                  "project_id": {},
+                  "recipient": {},
+                  "reply_to": {},
+                  "request_id": {
+                    "type": "string"
+                  },
+                  "task_id": {},
+                  "task_version": {}
+                },
+                "required": [
+                  "content",
+                  "kind",
+                  "project_id",
+                  "recipient",
+                  "reply_to",
+                  "request_id",
+                  "task_id",
+                  "task_version"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 task-message（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/task-message-status": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {
+                  "evidence": {},
+                  "id": {},
+                  "project_id": {},
+                  "request_id": {
+                    "type": "string"
+                  },
+                  "status": {},
+                  "version": {}
+                },
+                "required": [
+                  "evidence",
+                  "id",
+                  "project_id",
+                  "request_id",
+                  "status",
+                  "version"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 task-message-status（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/task-options": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "full",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "读取 task-options",
+        "tags": [
+          "read"
+        ]
+      }
+    },
+    "/v1/task-publish": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 task-publish（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/task-recover": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 task-recover（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/task-relation": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 task-relation（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/task-repair-open": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 task-repair-open（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/task-scope": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 task-scope（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/tasks": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "full",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "project",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "读取 tasks",
+        "tags": [
+          "read"
+        ]
+      }
+    },
+    "/v1/tasks/{task_id}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "读取单个 task",
+        "tags": [
+          "read"
+        ]
+      }
+    },
+    "/v1/token-prepare": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 token-prepare（不记入请求日志）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": false,
+        "x-round-only": true
+      }
+    },
+    "/v1/upgrade": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "读取 upgrade",
+        "tags": [
+          "read"
+        ]
+      }
+    },
+    "/v1/wait": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "timeout",
+            "required": false,
+            "schema": {
+              "maximum": 50,
+              "minimum": 0,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "保持请求直到本身份的待处理事件变化，最长 50 秒",
+        "tags": [
+          "read"
+        ],
+        "x-round-only": true
+      }
+    },
+    "/v1/window-admin": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 window-admin（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    },
+    "/v1/window-apply": {
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [],
+        "summary": "凭平台接入点的申请码提交申请或查询结果",
+        "tags": [
+          "enrollment"
+        ],
+        "x-round-only": true
+      }
+    },
+    "/v1/window-impact": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "name",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "读取 window-impact",
+        "tags": [
+          "read"
+        ]
+      }
+    },
+    "/v1/withdraw": {
+      "post": {
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ReportedAt"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 withdraw（记入请求日志，可用原 request_id 与原请求体重试）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": true
+      }
+    }
+  }
+}

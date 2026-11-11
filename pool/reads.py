@@ -48,6 +48,7 @@ def features(r, argument):
     result.update(api_protocol=1, input_download=dict(input_packages.BUDGET))
     result.setdefault('features', {})['input-package'] = True
     result['features']['list-summary'] = True
+    result['features']['openapi'] = True
     result['features'].update({'executor-complete': r.upgraded, 'post-completion': r.round_enabled, 'task-communication': r.round_enabled})
     from 协作安全 import READER
     from .project_capabilities import state_ready
@@ -58,6 +59,11 @@ def features(r, argument):
         result['features']['window-apply'] = True
         result['wait'] = {'max_seconds': wakeups.MAX_HOLD}
     return result
+
+
+def openapi(r, argument):
+    from .openapi import document
+    return document()
 
 
 def post_completion(r, argument):
@@ -427,7 +433,7 @@ def stored_file(r, argument):
 
 
 ROUTES = {
-    "features": features, "execution": execution_view, "post-completion": post_completion, "communication": communication, "window-impact": window_impact,
+    "features": features, "openapi": openapi, "execution": execution_view, "post-completion": post_completion, "communication": communication, "window-impact": window_impact,
     "capability-requests": capability_requests, "cleanup": cleanup, "invitations": invitations, "runner": runner,
     "notices": notices, "collaboration": collaboration, "sheet": sheet, "tasks": tasks, "task-options": task_options,
     "overview": overview, "activity": activity, "project-cards": project_cards, "project": project,

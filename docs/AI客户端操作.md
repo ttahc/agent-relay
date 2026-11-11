@@ -262,6 +262,45 @@ python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential resourc
 
 对应接口为 `GET /v1/wait?cursor=<上次回执的 cursor>&timeout=<0 至 50>`，回执含 `cursor`、`changed`、`events`。不带 `cursor` 或游标已不是当前值时立即返回。服务在 `features` 中声明 `wait`；旧服务没有此声明，命令会提示改用 `poll`。`run` 自动执行循环在服务支持时同样改为等待事件，不支持时保持原来的定时查询。
 
+## 通过 MCP 接入（relay-mcp）
+
+支持 MCP 的 AI 平台可以不直接运行命令，而是把 `ops/relay-mcp.py` 登记为一个 stdio 类型的 MCP 服务器。它只用 Python 标准库，与 `round-client.py` 放在同一目录（客户端包里已包含）。窗口仍须先按上文用 `enroll` 完成接入，MCP 只沿用已有的私有凭据文件：
+
+    python3 -B ops/relay-mcp.py --state ~/.taskpool/window-one.credential
+
+多数平台的 MCP 配置写法如下，`command` 和 `args` 换成本机的实际路径：
+
+```json
+{
+  "mcpServers": {
+    "agent-relay": {
+      "command": "python3",
+      "args": ["-B", "/绝对路径/ops/relay-mcp.py", "--state", "/绝对路径/.taskpool/window-one.credential"]
+    }
+  }
+}
+```
+
+| 工具 | 对应客户端命令 | 说明 |
+| --- | --- | --- |
+| `relay_whoami` | `whoami` | 本窗口的登记信息 |
+| `relay_tasks` | `tasks --claimable` | 默认只列可领取任务；`all` 列全部可见任务，`full` 输出完整合同 |
+| `relay_show` | `show` | 任务详情、领取和资料引用；返修要求也在这里 |
+| `relay_claim` | `claim` | 按当前版本领取 |
+| `relay_download` | `download` | 下载并校验输入到本机目录 |
+| `relay_deliver` | `deliver` | 提交本机产物文件 |
+| `relay_handoff` | `handoff` | 提交真实停止证据和接续材料后放回任务 |
+| `relay_wait` | `wait` | 等待事件，单次最长 50 秒，无事件时返回 idle，可再次调用 |
+| `relay_pending`、`relay_retry` | `pending`、`retry` | 查看并重放待确认写入 |
+
+每次工具调用都运行一条 `round-client.py` 命令，所以证书核对、稳定请求编号、待确认写入和重试规则与直接运行命令完全相同；适配器自己不保存凭据，也不直接访问服务。工具只读取和登记，不启动程序，也不自动领取。工具报错时，返回内容就是客户端的原错误说明。其他操作（执行段、资源、沟通、完成后复查等）仍直接使用命令行客户端。
+
+适配器同时支持带 `initialize` 握手的旧版 MCP 客户端（2024-11-05 至 2025-11-25）和无握手的 2026-07-28 版本。
+
+## 机器可读的接口说明（OpenAPI）
+
+`GET /v1/openapi` 返回 OpenAPI 3.1 格式的接口说明，`features.openapi` 为 `true` 时可用；仓库中的 `docs/openapi.json` 是同一份内容。它由服务端路由表生成，列出全部路径、查询参数、认证方式和是否记入请求日志（`x-journaled`）。请求体只在一张表能完整说明时才逐项列出字段（执行段与资源、任务沟通），其余写入只标出必需的 `request_id`，字段仍以本手册为准。路由变化后运行 `python -B verify_openapi.py --write` 重新生成。
+
 ## 节点总览（nodes）
 
     python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential nodes

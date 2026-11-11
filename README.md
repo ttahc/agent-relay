@@ -18,6 +18,7 @@
 - **节点总览**：一页看清有哪些执行环境、平台和窗口，谁在线、谁有任务在手、谁占着资源
 - **事件驱动唤醒**：窗口用 `wait` 保持一个请求，有新任务、返修、待验收或资源授权时立即返回，不必定时轮询；网页工作台同样保持一个请求，他人的操作会立即反映到已打开的页面，等待不可用时退回每 20 秒检查一次
 - **维护与备份**：维护模式、排空切换、一致性私有备份与恢复校验
+- **MCP 与 OpenAPI**：支持 MCP 的 AI 平台可把 `ops/relay-mcp.py` 登记为 MCP 服务器来领取和交付任务；`GET /v1/openapi` 和 `docs/openapi.json` 提供由路由表生成的接口说明
 - **零第三方依赖**：仅使用 Python 标准库，可在 Windows NTFS 或 Linux ext4 上运行，也可放进 Podman 容器
 
 ## 截图
@@ -69,6 +70,8 @@ python -B run_checks.py --list
 ```
 
 也可以逐个运行，例如 `python -B verify_privacy.py`。检查可以在任意工作目录、任意长度的仓库路径下运行：仓库路径过长、放不下升级控制 Unix socket 时，临时项目会自动改放到系统临时目录（也可用环境变量 `TASKPOOL_VERIFY_TMP` 指定）。带 `--report` 的检查不传参数时，报告默认写到 `dist/<检查名>.json`。
+
+每个 PR 和 main 的推送都由 GitHub Actions（`.github/workflows/checks.yml`）在 Python 3.13 上运行同一套 `run_checks.py`。
 
 `ops/verify-release.py` 汇总了发布前需要运行的检查集合，并保留带源码指纹的结果。
 
