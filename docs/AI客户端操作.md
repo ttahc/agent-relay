@@ -16,6 +16,24 @@ Windows PowerShell 使用相同参数：
 
 `--invite-url` 与旧版 `--invite` JSON 文件入口互斥。已保存原登记请求后遇到丢响应，继续用同一个 `--state` 恢复，客户端直接重试原请求，不再读取可能已用完额度的链接。已激活窗口可省略两种邀请参数执行 `enroll` 查询原身份。完整链接含接入证明，不能放进反馈或交付物；正常输出和链接校验错误不会回显它。
 
+### 没有邀请时：向平台接入点申请
+
+负责人为某个平台建立了接入点时，该平台的窗口可以凭接入点的申请资料自行申请，由负责人在网页同意后登记。把负责人提供的整段 JSON 保存为 `entry.json`，然后：
+
+    python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential enroll --apply entry.json --window-name "实际聊天标题" --wait 600
+
+命令显示 6 位配对码（`pairing_code`），回执状态为 `pending_approval`。把配对码告诉负责人，由负责人在「窗口管理 → 邀请窗口」核对后同意。提交申请不登记窗口、不占窗口编号、不产生任何权限；平台以接入点登记的为准，无需填写 `--platform`。
+
+- `--wait` 是等待负责人处理的秒数，省略时提交后立即返回。未等到结果时，用相同的 `--state` 再运行 `enroll`（不带 `--apply`）查询；负责人同意后，这一步自动完成登记和激活，回执为 `active`。
+- 负责人同意后须在 72 小时内回来完成登记；申请 72 小时无人处理自动作废。
+- 回执为 `approved` 表示负责人已同意、登记尚待服务确认。申请和恢复证明仍保存在凭据文件中，稍后用相同的 `--state` 再运行 `enroll` 即可，不要删除或更换凭据文件。
+- 回执为 `rejected`、`expired`、`revoked` 或 `lapsed` 时，申请已结束，凭据文件已清空，可向负责人确认后重新申请。
+- 每个窗口使用各自的凭据文件。同一平台会话在整个服务内同时只能有一项有效申请：已有待处理的申请，或申请已获同意但尚未完成登记时，在任何接入点再次申请都会被拒绝（409）；已登记的会话沿用原凭据。
+- 服务不支持窗口申请（旧版本）时，命令提示后清空尚未提交成功的申请，同一凭据文件可直接改用 `enroll --invite-url` 登记。
+- 申请资料中的 `code` 只能用于提交申请，仍不要写入反馈、日志或交付物。`--apply` 与 `--invite`、`--invite-url` 互斥。
+
+对应接口为 `POST /v1/window-apply`，服务在 `features` 中声明 `window-apply`；旧服务没有这个接口，命令会提示改用邀请链接。
+
 旧版 JSON 邀请继续可用。登记后先检查项目能力要求，再如实申报实际具备的技能：
 
     python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential enroll --invite invite.json --platform codex --window-name "实际聊天标题"
@@ -34,7 +52,7 @@ Windows PowerShell 使用相同参数：
 
 `whoami` 只读取当前凭据对应的 `identity`，显示平台登记的 `window_name`、窗口编号 `window`、`executor_id`、责任人 `owner` 与可见项目 `projects`。`name_source=platform-registration`、`chat_title_auto_detected=false` 表明名称来自平台登记；客户端不会自动读取 Claude、Codex 等应用的真实聊天标题。标题改变后，如需同步平台名称，请明确执行 `rename`。
 
-安全语义 5 的服务还返回 `default_context` 与 `active_task_contexts`：默认执行配置和各活动任务实际绑定的配置。切换默认配置不会改写旧执行段。普通模型／环境变化用下节 `context save`；`sync --model ... --environment ...` 在语义 5 也会新建配置版本，不修改稳定窗口来源平台。来源登记错误须由有权人员单独更正。
+安全语义 5 的服务还返回 `default_context` 与 `active_task_contexts`：默认执行配置和各活动任务实际绑定的配置。切换默认配置不会改写旧执行段。平台和描述文字不是物理环境标识；如管理员已登记环境，可用 `context save --environment-id <环境编号>` 为新配置选择实际实例，目录互斥由受信映射决定，见 [执行环境与资源映射](执行环境与资源映射.md)。普通模型／环境变化用下节 `context save`；`sync --model ... --environment ...` 在语义 5 也会新建配置版本，不修改稳定窗口来源平台。来源登记错误须由有权人员单独更正。
 
 `rename` 沿用原窗口、凭据和当前登记的 session、model、environment，只通过 `executor-sync` 修改 window_name，不重新登记或变更责任人。丢响应时保留原请求，可运行 `pending`、`retry` 或重复相同 `rename`；不要创建新凭据文件来改名。
 
@@ -93,7 +111,7 @@ python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential downloa
 ```sh
 python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential execution
 python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential context list
-python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential context save --platform codex --adapter manual --model unknown --reasoning unknown --tools-version unknown --permissions-version unknown --environment '<实际环境ID>' --make-default
+python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential context save --platform codex --adapter manual --model unknown --reasoning unknown --tools-version unknown --permissions-version unknown --environment '<实际环境描述>' --make-default
 python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential claim T1001 --context-id <配置ID> --context-version <版本>
 python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential segment open T1001 --claim-id <领取号> --context-id <配置ID> --context-version <版本>
 python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential action prepare <段ID> --description '<本次实际动作>' --adapter-id manual --domain '<明确主机或共享存储域>' --write 'path:<合同上界内路径>'
@@ -169,6 +187,12 @@ python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential resourc
 等待期间不占用凭据文件，同一窗口可以照常运行其他命令。服务升级、备份或暂时断开时，命令自行重连并继续等待；停机期间不会拖住升级。每个身份最多同时保持 2 个等待请求，服务总共 64 个，超出时回 429，可稍后再试或改用 `poll`。单个等待请求最长 50 秒，客户端自动续接。按时间才成立的变化（没有新的写入）最迟在一次续接内，也就是 50 秒内反映。
 
 对应接口为 `GET /v1/wait?cursor=<上次回执的 cursor>&timeout=<0 至 50>`，回执含 `cursor`、`changed`、`events`。不带 `cursor` 或游标已不是当前值时立即返回。服务在 `features` 中声明 `wait`；旧服务没有此声明，命令会提示改用 `poll`。`run` 自动执行循环在服务支持时同样改为等待事件，不支持时保持原来的定时查询。
+
+## 节点总览（nodes）
+
+    python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential nodes
+
+`nodes` 返回当前窗口可见的执行环境、平台和窗口：`summary` 是窗口数、在线数和各平台计数，`environments` 是可见的执行环境及其窗口，`windows` 逐个给出平台、责任人、联系状态 `presence`、活动任务和所在环境，`unplaced` 是没有绑定启用环境的窗口。别的窗口的执行环境和资源占用数不会返回。只读，不改变任何状态。
 
 ## 反馈与看板
 

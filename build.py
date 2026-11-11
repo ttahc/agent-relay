@@ -16,14 +16,14 @@ FILES = [".gitignore", "LICENSE", "README.md", "build.py", "taskpool.py", "pool/
          "pool/round_projects.py", "pool/round_projects_web.py", "pool/account_projects.py",
          "pool/delegation.py", "pool/delegation_pages.py", "pool/invite_links.py",
          "pool/privacy.py", "pool/release_views.py", "pool/release_pages.py", "pool/display_time.py", "pool/backup.py", "pool/input_packages.py",
-         "pool/window_admin.py", "pool/window_admin_pages.py", "pool/lifecycle.py", "pool/wakeups.py", "pool/sessions.py", "pool/safety.py", "pool/execution.py", "pool/execution_pages.py",
+         "pool/window_admin.py", "pool/window_admin_pages.py", "pool/lifecycle.py", "pool/wakeups.py", "pool/window_entries.py", "pool/window_entries_pages.py", "pool/sessions.py", "pool/safety.py", "pool/execution.py", "pool/environments.py", "pool/nodes.py", "pool/execution_pages.py",
          "pool/task_pages.py", "pool/upgrade.py", "pool/upgrade_pages.py",
          "pool/taskpool.css", "pool/workbench.py", "pool/workbench_pages.py", "pool/workbench.css", "pool/workbench.js", "vendor/SHA256SUMS", "docs/内网任务服务升级操作.md", "docs/本轮优化操作.md",
          "ops/podman-up.sh", "ops/fresh-install.sh", "ops/upgrade-local.sh", "ops/Set-LanIngress.ps1",
          "ops/Set-EasyTierIngress.ps1", "ops/verify-peer.py", "ops/round-client.py", "ops/round-client.ps1", "ops/round-local.sh",
          "ops/backup-store.py", "ops/safe-local-upgrade.sh", "ops/verify-release.py", "ops/launch-config.py", "ops/verify-backup.py",
          "ops/install-local-backup.sh", "ops/local-backup.sh", "ops/taskpool-local-backup.service", "ops/taskpool-local-backup.timer",
-         "docs/AI客户端操作.md", "docs/运维与升级.md"]
+         "docs/AI客户端操作.md", "docs/运维与升级.md", "docs/执行环境与资源映射.md"]
 
 
 def bundle_bytes():
@@ -69,7 +69,7 @@ def client_bundle_bytes():
     import json
     from pool import __version__
     files = {name: (ROOT / name).read_bytes() for name in (
-        "ops/round-client.py", "ops/round-client.ps1", "docs/AI客户端操作.md", "LICENSE")}
+        "ops/round-client.py", "ops/round-client.ps1", "docs/AI客户端操作.md", "docs/执行环境与资源映射.md", "LICENSE")}
     files["README.md"] = files["docs/AI客户端操作.md"]
     files["client-version.json"] = json.dumps({"version": __version__, "protocol": 1,
         "purpose": "ai-window-client"}, ensure_ascii=False, sort_keys=True).encode("utf-8")

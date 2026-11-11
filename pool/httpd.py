@@ -13,7 +13,7 @@ import time
 from threading import BoundedSemaphore, local
 from urllib.parse import parse_qs, urlsplit
 
-from . import round_service, round_web, web
+from . import round_service, round_web, web, window_entries
 from . import __version__
 from . import ROOT
 from .packages import ClientError, MAX_JSON, strict_json
@@ -59,6 +59,7 @@ READ_API = {
     "board": (None, None, "text/markdown; charset=utf-8", False),
     "projects": (None, None, JSON, False),
     "executors": (None, None, JSON, False),
+    "nodes": (None, None, JSON, False),
     "identity": (None, None, JSON, False),
     "upgrade": (None, None, JSON, False),
     "invitations": (None, None, JSON, True),
@@ -295,6 +296,8 @@ class Handler(BaseHTTPRequestHandler):
             body = self.request_json(round_service.MAX_SECRET_BODY)
             status, data = round_service.bootstrap(service, api_route, body, token if scheme.lower() == "bearer" else "")
             return status, data, JSON
+        if self.server.is_round and method == "POST" and api_route == "window-apply":
+            return 200, window_entries.apply(service, self.request_json(round_service.MAX_SECRET_BODY)), JSON
         if target.scheme or target.netloc or target.fragment or not target.path.startswith("/v1/"):
             raise ClientError("接口不存在", 404)
         action = target.path[4:]

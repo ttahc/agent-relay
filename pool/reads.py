@@ -50,6 +50,7 @@ def features(r, argument):
     result['features']['list-summary'] = True
     if r.round_enabled:
         result['features']['wait'] = True
+        result['features']['window-apply'] = True
         result['wait'] = {'max_seconds': wakeups.MAX_HOLD}
     return result
 
@@ -235,6 +236,9 @@ def executors(r, argument):
             source.update(auto=execution_settings(state, name)["auto"], capabilities=service.capability_rows(state, actor, name)[1],
                           memberships=[{"name": p["name"], "roles": sorted(rules.grant(state, p["id"], name)["roles"])}
                                        for p in joined if rules.grant(state, p["id"], name)["roles"]])
+    if r.route == "nodes":
+        from . import nodes
+        return nodes.overview(state, actor, sources)
     return {"executors": sources}
 
 
@@ -396,7 +400,7 @@ ROUTES = {
     "overview": overview, "activity": activity, "project-cards": project_cards, "project": project,
     "projects": projects, "input-package": input_package, "invitation-owners": invitation_owners,
     "release-readiness": release_readiness, "project-capabilities": project_capabilities, "executors": executors,
-    "window-cards": executors, "identity": identity, "delegations": delegations, "capabilities": capabilities,
+    "window-cards": executors, "nodes": executors, "identity": identity, "delegations": delegations, "capabilities": capabilities,
     "audit": audit, "receipt": receipt, "upgrade": upgrade_status, "receivers": receivers,
     "account-table": account_table, "accounts": accounts, "detail": detail, "task": task, "board": board,
     "artifact": stash_artifact,

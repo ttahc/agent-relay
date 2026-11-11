@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import json
 from threading import RLock
 from types import SimpleNamespace
+import sqlite3
 import unittest
 from unittest.mock import patch
 from urllib.parse import urlencode, urlsplit
@@ -22,6 +23,10 @@ def task(tid, owner="owner", receiver="reviewer"):
 
 class InvitationService:
     lock = RLock()
+    db = sqlite3.connect(":memory:", check_same_thread=False)  # the page also lists platform entry points; none here
+
+    def snapshot(self):
+        return {"state": {}}
 
     def read(self, actor, route, argument=None):
         if route == "projects":

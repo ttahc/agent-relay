@@ -602,21 +602,99 @@ def finish_activation(state, api):
             **onboarding_summary(api, data["token"])}
 
 
+APPLICATION_ENDED = {"rejected": "申请已被拒绝", "expired": "申请超过时限无人处理，已作废", "revoked": "接入点已撤销，申请作废",
+                     "lapsed": "同意已失效"}
+
+
+def apply_for_window(state, api, args):
+    """Ask at a platform entry point and report where the application stands.
+
+    Asking registers nothing. The window gets its credential only after the responsible person
+    agrees on the web page; until then this returns the pairing code to tell that person.
+    """
+    data = state.data
+    wait = getattr(args, "wait", None) or 0
+    if not 0 <= wait <= 86400:
+        raise ValueError("等待时长须为 0 至 86400 秒")
+    started = time.monotonic()
+    announced = False
+    while True:
+        try:
+            result = api.call("window-apply", body=data["application"])
+        except RequestError as error:
+            if error.status in {403, 404, 409, 429} and not data.get("applied"):
+                data.clear()  # nothing was filed; the credential file stays free for another attempt
+                state.save()
+            if error.status == 404:
+                raise ValueError("当前服务不支持窗口申请；" + (
+                    "请确认服务地址和版本后用相同凭据文件运行 enroll 重试" if data else
+                    "此凭据文件未保留申请，可升级服务后重新申请，或直接用它改走邀请登记（enroll --invite-url）")) from None
+            raise
+        status = result.get("status")
+        if status in {"pending_activation", "active"} and result.get("token"):
+            data.update(token=result["token"], registration_id=result["registration_id"])
+            data.pop("application", None)
+            data.pop("applied", None)
+            state.save()
+            return finish_activation(state, api)
+        if status in APPLICATION_ENDED:
+            data.clear()
+            state.save()
+            return {"status": status, "message": result.get("message") or APPLICATION_ENDED[status],
+                    "next": "此凭据文件已清空，可向负责人确认后重新运行 enroll --apply 提交新的申请"}
+        if status not in {"pending_approval", "approved"}:
+            raise ValueError("服务申请回执不完整，请稍后重新运行 enroll")
+        if not data.get("applied"):
+            data["applied"] = True
+            state.save()
+        # "approved" without a credential: the registration is still being confirmed. The application and its
+        # recovery secret stay in the credential file, so the same request can be repeated.
+        summary = {"status": status, "pairing_code": result["pairing_code"], "project": result.get("project"),
+                   "owner": result.get("owner"), "expires": result.get("expires"), "credential_location": str(state.path),
+                   "next": "负责人已同意，登记尚待服务确认；稍后用相同凭据文件运行 enroll 完成登记和激活" if status == "approved" else
+                           "把配对码告诉负责人，由负责人在网页「邀请窗口」核对后同意；之后用相同凭据文件运行 enroll 查询结果并完成激活"}
+        left = wait - (time.monotonic() - started)
+        if left <= 0:
+            return summary
+        if not announced:
+            print(json.dumps(summary, ensure_ascii=False), file=sys.stderr, flush=True)
+            announced = True
+        time.sleep(min(left, 10))
+
+
 def enroll(state, args):
     data = state.data
+    entry = getattr(args, "apply", None)
     has_invitation = bool(args.invite or getattr(args, "invite_url", None))
-    if data and has_invitation and "request" not in data:
-        raise ValueError("此凭据文件已绑定窗口，新窗口请使用不同文件")
-    if not data:
+    if data and (has_invitation or entry) and "request" not in data:
+        raise ValueError("此凭据文件已有待处理的窗口申请，请直接运行 enroll 查询结果" if "application" in data
+                         else "此凭据文件已绑定窗口，新窗口请使用不同文件")
+    if data and entry:
+        raise ValueError("此凭据文件已有未完成的邀请登记，请直接运行 enroll 继续")
+    if not data and entry:
+        value = bundle(entry)
+        if value.get("kind") != "ai-window-entry" or not value.get("id") or not value.get("code"):
+            raise ValueError("--apply 须使用平台接入点的申请资料；邀请资料请使用 --invite 或 --invite-url")
+        args.platform = value.get("platform") or args.platform
+        profile = source(args)
+        data.update(url=value["url"], certificate_sha256=value.get("certificate_sha256"), connect_host=value.get("connect_host"),
+                    source=profile, application={"request_id": "apply-" + secrets.token_hex(16), "entry_id": value["id"],
+                                                 "code": value["code"], "recovery": secrets.token_urlsafe(32), "source": profile})
+        state.save()
+    elif not data:
         if not has_invitation:
-            raise ValueError("请提供 --invite 文件路径（或 -）或 --invite-url 完整邀请链接")
+            raise ValueError("请提供 --invite 文件路径（或 -）、--invite-url 完整邀请链接，或 --apply 平台接入点申请资料")
         value = load_invitation(args)
+        if value.get("kind") == "ai-window-entry":
+            raise ValueError("这是平台接入点的申请资料，请改用 enroll --apply")
         profile = source(args)
         data.update(url=value["url"], certificate_sha256=value.get("certificate_sha256"), connect_host=value.get("connect_host"), source=profile,
                     request={"request_id": "enroll-" + secrets.token_hex(16), "invite_id": value["id"],
                              "code": value["code"], "recovery": secrets.token_urlsafe(32), "source": profile})
         state.save()
     api = endpoint(state, args)
+    if "application" in data and "token" not in data:
+        return apply_for_window(state, api, args)
     if "request" in data and "token" not in data:
         result = api.call("ai-prepare", body=data["request"])
         data.update(token=result["token"], registration_id=result["registration_id"])
@@ -1311,6 +1389,9 @@ def execution_command(state, api, args):
                                  for field in ("platform", "adapter", "model", "reasoning", "tools_version", "permissions_version", "environment")}
             body = {"context_id": args.context_id, "version": previous["version"] if previous else 0,
                     "config": config, "make_default": args.make_default}
+            environment_id = getattr(args, "environment_id", None)
+            if environment_id is not None or base.get("environment_id"):
+                body["environment_id"] = environment_id if environment_id is not None else base["environment_id"]
         elif route == "segment-open":
             view = api.call("tasks/" + quote(args.task, safe=""), state.data["token"])
             binding = own_claim(state, api, args.task, args.claim_id)
@@ -1628,6 +1709,8 @@ def build_parser():
     invitation = create.add_mutually_exclusive_group()
     invitation.add_argument("--invite", help="邀请文件路径，- 代表标准输入")
     invitation.add_argument("--invite-url", help="邀请人提供的完整单链接，包括 # 后的校验片段")
+    invitation.add_argument("--apply", help="平台接入点的申请资料文件路径，- 代表标准输入；提交后须由负责人在网页同意")
+    create.add_argument("--wait", type=int, default=0, help="提交申请后等待负责人处理的秒数，0 为立即返回")
     create.add_argument("--platform", default="external", choices=("codex", "claude", "gemini", "external"))
     create.add_argument("--session")
     create.add_argument("--model")
@@ -1736,6 +1819,7 @@ def build_parser():
     feedback_update.add_argument("--limits")
     delegates = commands.add_parser("delegations", help="查看当前窗口的委托范围、期限与状态")
     delegates.add_argument("--project")
+    commands.add_parser("nodes", help="查看可见的执行环境、平台和窗口，以及各自的在线与任务情况")
     board = commands.add_parser("board", help="读取 Markdown 看板")
     board.add_argument("--output", type=Path)
     commands.add_parser("pending", help="查看待确认写入及原请求编号")
@@ -1751,6 +1835,7 @@ def build_parser():
     save_context.add_argument("--context-id", help="更新该配置的不可变下一版本；省略则创建新配置")
     for field in ("platform", "adapter", "model", "reasoning", "tools-version", "permissions-version", "environment"):
         save_context.add_argument("--" + field)
+    save_context.add_argument("--environment-id", help="管理员登记的执行环境编号；空字符串清除绑定，不从平台或环境描述推断")
     save_context.add_argument("--make-default", action="store_true", help="仅供新动作选择，不覆盖旧执行段")
     segment = commands.add_parser("segment")
     segment_commands = segment.add_subparsers(dest="operation", required=True)
@@ -1904,6 +1989,7 @@ SERVICE_COMMANDS = {
     "feedback-update": lambda state, api, args: update_feedback(state, api, args),
     "delegations": lambda state, api, args: delegation_records(state, api, args),
     "board": lambda state, api, args: read_board(state, api, args),
+    "nodes": lambda state, api, args: api.call("nodes", state.data["token"]),
     "retry": lambda state, api, args: durable_write(state, api),
     "poll": lambda state, api, args: poll(state, api),
     "configure": lambda state, api, args: configure_runner(state, api, args),

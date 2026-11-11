@@ -182,7 +182,7 @@ def adopt(html, target, actor, service):
     top = topbar(heading, path, filters, data["projects"])
     if path.startswith(ACCOUNT_PAGES):
         top += account_tabs(path, service.is_admin(actor))
-    if path.startswith(("/executors", "/assistants", "/capabilities")) or path == "/invitations":
+    if path.startswith(("/executors", "/assistants", "/capabilities")) or path in {"/invitations", "/nodes"}:
         top += window_tabs(path)
     html = HEADER.sub(lambda _: top.encode("utf-8"), html, 1)
     scope = "当前筛选" if path == "/" else "当前项目" if project else "全部有权项目"
@@ -196,13 +196,13 @@ def adopt(html, target, actor, service):
 
 
 def active(href, path):
-    if href == "/executors" and path.startswith(("/assistants", "/capabilities", "/executors")):
+    if href == "/executors" and (path.startswith(("/assistants", "/capabilities", "/executors")) or path == "/nodes"):
         return True
     return path == href if href == "/" else path.startswith(href)
 
 
 def window_tabs(path):
-    items = (("/executors", "窗口"), ("/assistants", "我的助理与委托"), ("/capabilities", "能力"), ("/invitations", "邀请窗口"))
+    items = (("/executors", "窗口"), ("/nodes", "节点总览"), ("/assistants", "我的助理与委托"), ("/capabilities", "能力"), ("/invitations", "邀请窗口"))
     return '<nav class="seg wb-tabs" aria-label="窗口管理">' + "".join(
         f'<a href="{href}"{current(active(href, path) if href != "/executors" else path.startswith("/executors"))}>{label}</a>'
         for href, label in items) + '</nav>'

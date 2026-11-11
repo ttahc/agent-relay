@@ -21,7 +21,7 @@ from .service import PUBLIC_ACTIONS
 PATHS = {"/", "/login", "/logout", "/register", "/accounts", "/board.md", "/assets/taskpool.css", "/tasks/new", "/workspace-receipt"}
 WORKBENCH_PATHS = {"/board", "/list"}
 TASK_PATH = re.compile(r"/tasks/(T[0-9]{2,15})")
-UPGRADE_PATHS = {"/projects", "/executors", "/capabilities", "/audit", "/upgrade"}
+UPGRADE_PATHS = {"/projects", "/executors", "/nodes", "/capabilities", "/audit", "/upgrade"}
 UPGRADE_DETAIL = re.compile(r"/(projects|executors)/([A-Za-z0-9_-]{1,80})")
 WEB_ACTIONS = PUBLIC_ACTIONS - {"deliver"}
 SESSION_AGE = 8 * 60 * 60
@@ -610,8 +610,15 @@ def upgrade_view(service, actor, target):
             return "项目", workbench_pages.project_page(actor, project, tasks, service.read(actor, "activity"), tab)
         return "项目", upgrade_pages.project_page(actor, project, tasks)
     if path == "/executors" and workspace:
-        return "窗口管理", workbench_pages.windows_page(actor, profile, service.read(actor, "window-cards")["executors"], service.read(actor, "overview")["tasks"],
-                                                   parse_qs(target.query).get("archived") == ["1"])
+        from . import window_entries_pages
+        return "窗口管理", window_entries_pages.banner(service, actor) + workbench_pages.windows_page(
+            actor, profile, service.read(actor, "window-cards")["executors"], service.read(actor, "overview")["tasks"],
+            parse_qs(target.query).get("archived") == ["1"])
+    if path == "/nodes":
+        if not workspace:
+            raise ClientError("节点总览需要本轮工作台", 404)
+        from . import nodes, window_entries_pages
+        return "节点总览", nodes.page(actor, service.read(actor, "nodes"), window_entries_pages.banner(service, actor))
     if path == "/executors":
         return "窗口目录", upgrade_pages.executor_index(actor, profile, service.read(actor, "executors")["executors"], service.round_enabled())
     if path.startswith("/executors/"):
