@@ -64,6 +64,15 @@ def capability_check(state, actor, record, context, requirement=None):
     definitions = state.get("security", {}).get("execution", {}).get("capability_definitions", {})
     definition = definitions.get(str(project) + ":" + str(cap_id), definitions.get(cap_id, {}))
     technical = set(definition.get("dimensions", [])) | set(requirement.get("dimensions", []))
+    number = requirement.get("definition_version", record.get("definition_version"))
+    if number is not None:
+        from pool import project_capabilities
+        definition = project_capabilities.revision(state, project, cap_id, number) or {}
+        if not definition or record.get("definition_version") != number:
+            return {"matches": False, "status": "rule-changed", "reason": "证据对应的目录版本不符"}
+        if not project_capabilities.probe_current(state, actor, record, context, {**requirement, "project_id": project}):
+            return {"matches": False, "status": "probe-stale", "reason": "探测端、环境或凭据已变化，须重新核验"}
+        technical |= set(definition["dimensions"])
     required_level = requirement.get("evidence", record.get("level", "declared"))
     allow_unknown = set(definition.get("allow_unknown", [])) | set(requirement.get("allow_unknown", []))
     independently_known = set(definition.get("verified_dimensions", [])) | set(requirement.get("verified_dimensions", []))
@@ -79,7 +88,7 @@ def capability_check(state, actor, record, context, requirement=None):
     dependencies = binding.get("dependencies", {})
     if not technical <= set(dependencies):
         return {"matches": False, "status": "missing-dependencies", "reason": "证据未覆盖能力定义要求的技术依赖"}
-    if binding.get("rule_version") != definition.get("rule_version", 1):
+    if binding.get("rule_version") != (number if number is not None else definition.get("rule_version", 1)):
         return {"matches": False, "status": "rule-changed", "reason": "能力适用规则版本已变化"}
     for key, expected in dependencies.items():
         actual = config.get(key, "unknown")
@@ -119,8 +128,11 @@ def eligible(state, task, actor, context, now):
     missing, refs = [], []
     project = rules.task_project(task)
     for requirement in (rules.contract(task) or {}).get("requirements", []):
-        key = f"cap:{project}:{actor}:{requirement['id']}"
-        record = state["pilot"].get(key)
+        from pool.project_capabilities import applicable_record, record_key
+        number = requirement.get("definition_version")
+        key = (record_key(project, actor, requirement["id"], number) if number is not None
+               else f"cap:{project}:{actor}:{requirement['id']}")
+        record = applicable_record(state, project, actor, requirement)
         suitable = bool(record and record.get("kind") == requirement["kind"] and
                         (requirement["value"] == "*" or record.get("value") == requirement["value"]) and
                         rules.LEVEL.get(record.get("level"), 0) >= rules.LEVEL[requirement["evidence"]] and

@@ -765,7 +765,7 @@ def detail(actor, view, brief, events):
     return pages.workspace(actor, f'<section class="wb-page">{sheet(actor, view, brief, events)}</section>')
 
 
-def new_task(actor, projects, project, receivers, capabilities, members, tasks):
+def new_task(actor, projects, project, receivers, capabilities, members, tasks, catalog=()):
     manager = "manager" in project["roles"]
     tabs = ('<nav class="seg" aria-label="项目">' + "".join(f'<a data-new-task href="/tasks/new?{e(urlencode({"project": p["id"]}), quote=True)}"{current(p["id"] == project["id"])}>{e(p["name"])}</a>'
                                                           for p in projects) + "</nav>") if len(projects) > 1 else ""
@@ -776,8 +776,13 @@ def new_task(actor, projects, project, receivers, capabilities, members, tasks):
     owner_field = ui.identity_picker("dispatch_owner", "任务负责人", [m for m in members if m["identity"] in people], owner, optional=True)
     executors = [m for m in members if "executor" in m["roles"]]
     target = ui.identity_picker("dispatch_subjects", "指定对象", executors, optional=True)
+    catalog_ids = {row["id"] for row in catalog}
     caps = "".join(f"""<label>{e(cap)}<select name="cap-{e(cap, quote=True)}"><option value="">不要求</option>
-  {f'<option value="skill:declared">需要</option>' if kind == "skill" else ""}<option value="{e(kind)}:verified">需核实</option></select></label>""" for cap, kind in capabilities)
+  {f'<option value="skill:declared">需要</option>' if kind == "skill" else ""}<option value="{e(kind)}:verified">需核实</option></select></label>""" for cap, kind in capabilities if cap not in catalog_ids)
+    caps += "".join(f'<label>{e(row["label"])} · {e(row["id"])}<select name="cap-{e(row["id"], quote=True)}">'
+                    f'<option value="">不要求</option><option value="catalog:{row["version"]}">'
+                    f'需要 · {e(row["evidence"])} · v{row["version"]}</option></select></label>'
+                    for row in catalog if row["active"])
     deps = "".join(f'<option value="{e(json.dumps([{"task": t["task_id"], "output": "delivery", "criterion": c} for c in t["completes_on"]], ensure_ascii=False), quote=True)}">'
                    f'{e(t["task_id"])} {e(t["title"])}</option>' for t in tasks
                    if project_of(t) == project["id"] and t["stage"] not in ARCHIVE and len(t["completes_on"]) <= 30)

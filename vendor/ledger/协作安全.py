@@ -2,7 +2,7 @@
 from copy import deepcopy
 from 协作存储 import Rejected
 
-READER = 7
+READER = 8
 
 DOMAIN_OPS = {'environment-save', 'resource-map-save', 'storage-domain-register', 'storage-domain-merge'}
 DOMAIN_TABLES = {'environments', 'environment_history', 'resource_mappings', 'resource_mapping_history',

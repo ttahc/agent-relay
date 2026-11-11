@@ -745,11 +745,48 @@ def activate(state, args):
     return finish_activation(state, endpoint(state, args))
 
 
+def catalog_input(args):
+    if not args.definition_version or not args.context_id or args.context_version is None:
+        raise ValueError("目录能力须指定 --definition-version、--context-id 和 --context-version")
+    return {key: getattr(args, key) for key in ("project", "capability", "definition_version", "context_id", "context_version")}
+
+
+def catalog_write(state, api, args, method):
+    parameters = catalog_input(args)
+    body = {**parameters, "project_id": parameters["project"]}
+    del body["project"]
+    if method != "probe":
+        if not args.evidence or not 1 <= args.days <= 365:
+            raise ValueError("须填写证据说明及 1 至 365 天有效期")
+        if method == "manual" and not re.fullmatch(r"[a-fA-F0-9]{64}", args.evidence_sha256 or ""):
+            raise ValueError("人工核验须提供证据文件的 SHA256")
+        body.update(value=args.value, evidence={"note": args.evidence, "sha256": (args.evidence_sha256 or "").lower()})
+        parameters.update(value=args.value, evidence=body["evidence"], days=args.days)
+    def prepare():
+        value = dict(body)
+        if method != "probe":
+            value["expires"] = int(time.time()) + args.days * 86400
+        if method == "declare":
+            records = api.call("capabilities", state.data["token"])["capabilities"]
+            old = next((row for row in records if row["project_id"] == args.project and row["id"] == args.capability
+                        and row.get("definition_version") == args.definition_version), {})
+            value["version"] = old.get("version", 0)
+        else:
+            value["method"] = method
+        return value
+    route = "capability-save" if method == "declare" else "capability-request"
+    return durable_write(state, api, operation_key("catalog-" + method, parameters), route, prepare)
+
+
 def declared_capability(state, api, args):
+    if getattr(args, "definition_version", None) is not None:
+        return catalog_write(state, api, args, "declare")
+
     def prepare():
         profile = api.call("identity", state.data["token"])
         records = api.call("capabilities", state.data["token"])["capabilities"]
-        old = next((row for row in records if row["project_id"] == args.project and row["id"] == args.capability), {})
+        old = next((row for row in records if row["project_id"] == args.project and row["id"] == args.capability
+                    and "definition_version" not in row), {})
         if old and (old.get("kind") != "skill" or old.get("level") != "declared"):
             raise ValueError("此能力已有环境或核实记录，请通过能力页面按证据流程维护；declare 只维护已申报技能")
         environment = args.environment or (profile.get("binding") or {}).get("environment")
@@ -791,6 +828,11 @@ def visible_tasks(state, api, args):
 
 
 def request_capability(state, api, args):
+    method = getattr(args, "method", "manual")
+    if getattr(args, "definition_version", None) is not None or method == "probe":
+        return catalog_write(state, api, args, method)
+    if not args.evidence or not args.evidence_sha256:
+        raise ValueError("人工核验须提供 --evidence 和 --evidence-sha256")
     parameters = {key: getattr(args, key) for key in ("project", "capability", "kind", "value", "environment",
                                                      "evidence", "evidence_sha256", "days")}
 
@@ -1806,8 +1848,11 @@ def build_parser():
     cap_request.add_argument("--kind", choices=("skill", "environment"), default="skill")
     cap_request.add_argument("--value", default="ok")
     cap_request.add_argument("--environment")
-    cap_request.add_argument("--evidence", required=True)
-    cap_request.add_argument("--evidence-sha256", required=True)
+    cap_request.add_argument("--evidence")
+    cap_request.add_argument("--evidence-sha256")
+    cap_request.add_argument("--method", choices=("manual", "probe"), default="manual")
+    cap_catalog = cap_commands.add_parser("catalog", help="查看项目能力目录和版本")
+    cap_catalog.add_argument("--project", required=True)
     cap_request.add_argument("--days", type=int, default=7)
     cap_resolve = cap_commands.add_parser("resolve", help="由有权限的另一位项目管理者或验收人处理核实")
     cap_resolve.add_argument("verification_id")
@@ -1822,6 +1867,10 @@ def build_parser():
     declare.add_argument("--evidence", required=True)
     declare.add_argument("--evidence-sha256")
     declare.add_argument("--days", type=int, default=7)
+    for command in (cap_request, declare):
+        command.add_argument("--definition-version", type=int)
+        command.add_argument("--context-id")
+        command.add_argument("--context-version", type=int)
     show = commands.add_parser("show", help="查看任务详情、领取和资料引用")
     show.add_argument("task")
     take = commands.add_parser("claim", help="按当前版本领取任务")
@@ -1967,6 +2016,8 @@ def capability_records(state, api, args):
         return request_capability(state, api, args)
     if args.capability_action == "resolve":
         return resolve_capability(state, api, args)
+    if args.capability_action == "catalog":
+        return api.call("project-capability-catalog?" + urlencode({"project": args.project}), token)
     if args.capability_action == "requests":
         value = api.call("capability-requests", token)
         if args.project:

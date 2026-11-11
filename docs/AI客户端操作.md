@@ -45,6 +45,80 @@ Windows PowerShell 使用相同参数：
 
 `declare` 仅维护当前窗口的 `declared` 技能；它不会把声明变成已核实能力，也不会覆盖已有环境或核实记录。环境能力与需核实的技能通过平台证据流程处理。可用 `capabilities --project <项目>` 查看指定项目记录。
 
+## 项目能力目录与可信探测
+
+使用与任务要求相同的目录版本，并指定本窗口实际使用的执行配置：
+
+```sh
+python3 -B ops/round-client.py --state <窗口凭据> capabilities catalog --project <项目>
+python3 -B ops/round-client.py --state <窗口凭据> capabilities request --project <项目> --capability <能力> --definition-version 1 --context-id <配置> --context-version 1 --method probe
+python3 -B ops/round-client.py --state <窗口凭据> capabilities --project <项目> requests
+```
+
+人工核验用 `--method manual`，同时提交 `--value`、`--evidence` 和 `--evidence-sha256`。自报技能使用原 `declare` 命令，并附相同目录版本和配置参数。旧任务的能力仍使用不带目录版本的命令。证据过期、环境或相关配置变化后，使用当前配置重新申请。
+
+### 节点自行实现的 HTTP 协议
+
+以下接口使用 Agent Relay 的 HTTPS 服务地址。请求体和响应是 UTF-8 JSON。节点使用已登记窗口的 Bearer 令牌，探测端使用管理员单独登记的 Bearer 凭据，格式为 `<verifier_id>.<secret>`。`secret` 由 32 字节随机数生成无填充 Base64URL 字符串（43 个字符）。服务登记的是该字符串的 SHA256。节点自行选用本机运行方式，项目目录规定它需要证明的能力、证据等级和已批准的探测模板。项目服务端只处理申请和回执。
+
+尚未登记的节点可先用原邀请流程获取窗口令牌。在核对邀请中的服务名和证书指纹后，向 `GET /v1/ai-invite-info?invite_id=<邀请>` 发送链接中的专用 Bearer 证明。用返回的邀请 `code` 调用 `POST /v1/ai-prepare`，提交 `request_id`、`invite_id`、`code`、本机持久保存的随机 `recovery` 和实际 `source`。`source` 至少提供平台与稳定会话标识，Hermes 可使用 `platform=external`。准备回执给出 `registration_id` 和待激活令牌。用该令牌调用 `POST /v1/ai-activate`，提交新的稳定 `request_id` 和原 `registration_id`。激活回执为 `active` 后才开始项目操作。准备回执丢失时，用原 `request_id`、`invite_id` 和 `recovery` 调用 `POST /v1/ai-recover`。
+
+| 阶段 | 方法和路径 | 主要输入与结果 |
+| --- | --- | --- |
+| 查看能力 | `GET /v1/features`、`GET /v1/project-capability-catalog?project=<项目>` | 检查 `features.project-capabilities`。从目录 `definitions` 读取条目的 `id`、`version`、`kind`、`value`、`evidence` 和 `probe`。空 `probe` 表示人工核验 |
+| 选择配置 | `GET /v1/identity`、`GET /v1/execution` | 用窗口身份核对自己的配置编号和版本。可信探测须选择绑定了已登记执行环境的配置 |
+| 申请核验 | `POST /v1/capability-request` | 提交项目、能力和所选配置。成功后读取 `verification_id` 和 `verification_state`。使用 `method=manual` 时另提交 `value`、`evidence` 和 Unix 秒级 `expires` |
+| 领取探测 | `POST /v1/capability-probe-claim` | 仅用独立探测凭据，提交 `request_id`。`job=null` 表示没有可领取工作。否则读取 `job.id`、`attempt`、`template`、`expected_value`、`expected_dimensions`、环境与配置版本及 `lease_expires` |
+| 回传结论 | `POST /v1/capability-probe-result` | 继续使用领取该次探测的凭据。按原 `verification_id` 和 `attempt` 回传。服务重新核对项目、环境、证据等级、有效期和实测值 |
+| 查看结果 | `GET /v1/capability-requests`、`GET /v1/capabilities` | 前者是可见核验申请列表，后者的 `capabilities` 是当前可见的能力证据。使用原项目、能力编号和目录版本匹配 |
+
+窗口申请可信探测的最小请求体：
+
+```json
+{
+  "request_id": "example-capability-request-1",
+  "project_id": "demo-project",
+  "capability": "hermes-api",
+  "definition_version": 1,
+  "context_id": "local-profile",
+  "context_version": 1,
+  "method": "probe"
+}
+```
+
+探测成功回传的请求体：
+
+```json
+{
+  "request_id": "example-probe-result-1",
+  "verification_id": "<领取回执中的 job.id>",
+  "attempt": "<领取回执中的 job.attempt>",
+  "outcome": "pass",
+  "value": "available",
+  "measured": {"environment": "<与 job.expected_dimensions 对应的实测环境值>"},
+  "evidence": {"note": "已核对能力接口响应", "sha256": "<证据原件的 64 位小写十六进制 SHA256>"}
+}
+```
+
+`hermes-api` 对应可用的 Hermes REST 能力接口，成功值为 `available`。`git-version` 回报实测版本号和 `tools_version`。`workspace-rw` 回报 `rw` 和探测环境。`measured` 只包含该模板要求的实测维度。探测失败时提交 `outcome=fail`、空 `value` 和空对象 `measured`，证据说明填写失败原因。证据原件留在节点，回执只传摘要。人工核验由有权人员调用 `POST /v1/capability-resolve`，提交 `request_id`、`verification_id`、申请 `version`、`decision`、`level` 和 `reason`。
+
+写入重试沿用原请求编号和原请求体。拿到空领取回执后，下次轮询用新编号。探测领取有效期为 120 秒，申请最迟一小时到期。过期领取可被重新分配，旧 `attempt` 的回传会被拒绝。同一成功回传重试会返回原回执。`verification_state=approved` 表示证据已登记。随后由节点重新读取原任务的版本与范围，再按原 `/v1/claim` 协议请求领取。服务仍核对任务状态、能力、前置条件和授权。
+
+### 安装独立探测端
+
+用隔离的服务账号运行探测端，确保 AI 窗口无法读取该账号的凭据。管理员在节点本机准备独立探测状态、绝对路径的 Git 程序和专用临时目录。Hermes 探测使用该节点回环上的能力接口及其私有凭据文件。可只配置需要的模板。Git 和目录探测必须使用节点实际执行账号。POSIX 上若探测端与执行账号不同，由管理员运行探测端并加 `--runtime-user <执行账号>`，固定探测在该账号权限下执行。
+
+```sh
+python3 -B ops/capability-prober.py --state <探测端私有状态> init \
+  --verifier-id <探测端编号> --environment-id <已登记环境编号> --environment-label <执行配置中的环境值> \
+  --url <服务HTTPS根地址及端口> --certificate-sha256 <已核对的证书指纹> \
+  --git <Git程序绝对路径> --scratch <探测专用目录> --hermes-port <本机端口> --hermes-key-file <私有凭据文件>
+```
+
+初始化回执提供登记所需的凭据 SHA256。系统管理员按执行环境登记的维护方式，在服务写实例停止后，用 `taskpool.py capability-verifier-save --request-id <稳定编号> --config <私有JSON文件>` 登记。配置字段为 `verifier_id`、`environment_id`、`token_sha256`、`version`（新登记填 0）、`projects`、`templates`、`level` 和 `active`。模板为 `hermes-api`、`git-version`、`workspace-rw`，等级为 `probed` 或 `verified`。
+
+服务恢复后，运行 `python3 -B ops/capability-prober.py --state <探测端私有状态> once` 领取并核验一项。断线重试使用同一私有状态。探测结论默认有效 24 小时。Git 实测值为版本号，Hermes 接口通过的值为 `available`，隔离目录读写通过的值为 `rw`。执行配置的工具版本或环境值须与实测对应。该过程只做能力核验。
+
 ## 确认当前窗口与修改登记名称
 
     python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential whoami

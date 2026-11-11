@@ -152,8 +152,8 @@ def capability_rows(service, state, actor, name):
     permitted = actor in {name, owner} or service.is_admin(actor)
     rows = []
     for key, record in state["pilot"].items():
-        if key.startswith("cap:"):
-            _, project, subject, cap_id = key.split(":")
+        if key.startswith(("cap:", "catalog-cap:")):
+            _, project, subject, cap_id, *_ = key.split(":")
             if subject == name and (permitted or project in allowed_projects):
                 rows.append({"id": cap_id, "project_id": project, **record})
     return permitted or bool(allowed_projects), rows

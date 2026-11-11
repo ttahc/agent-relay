@@ -102,13 +102,15 @@ def settings_tab(project):
         ui.selection("enabled", "项目许可", [("no", "仅通知"), ("yes", "可按任务与窗口授权自动执行")], "yes" if automation["enabled"] else "no"))}</div>"""
 
 
-def project_page(actor, project, tasks, activity, tab):
-    tab = tab if tab in {"members", "settings"} else "overview"
+def project_page(actor, project, tasks, activity, tab, capability_section="", capabilities_enabled=False):
     names = (("overview", "概览"), ("members", "成员"), ("settings", "设置"))
+    if capabilities_enabled:
+        names += (("capabilities", "能力"),)
+    tab = tab if tab in {key for key, _ in names} else "overview"
     links = "".join(f'<a href="/projects/{quote(project["id"])}{"" if key == "overview" else "?tab=" + key}"'
                     f'{" aria-current=\"page\"" if key == tab else ""}>{name}</a>' for key, name in names)
     body = {"overview": lambda: overview_tab(project, tasks, activity), "members": lambda: wb.members_section(project),
-            "settings": lambda: settings_tab(project)}[tab]()
+            "settings": lambda: settings_tab(project), "capabilities": lambda: capability_section}[tab]()
     return work(actor, f"""<div class="phead"><a href="/projects">← 全部项目</a></div>
   <div class="phead"><h2>{e(project["name"])}</h2>{role_chip(project["roles"])}<nav class="seg right" aria-label="项目页面">{links}</nav></div>{body}""")
 

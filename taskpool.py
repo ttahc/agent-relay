@@ -141,7 +141,7 @@ def build_parser():
     control.add_argument("--timeout", type=float, default=30)
     control.add_argument("--archive", help="backup：当前服务用户可写的私有备份绝对目录")
     control.add_argument("--tag", help="backup：不覆盖现有快照的唯一名称")
-    for operation in ("environment-save", "resource-map-save", "storage-domain-register", "storage-domain-merge"):
+    for operation in ("environment-save", "resource-map-save", "storage-domain-register", "storage-domain-merge", "capability-verifier-save"):
         registry = commands.add_parser(operation, help="停服后由本机管理员登记执行环境或核实物理目录映射")
         registry.add_argument("--request-id", required=True)
         registry.add_argument("--config", type=Path, required=True, help="该操作的完整 JSON 字段（不含 request_id）")
@@ -309,7 +309,7 @@ def run_with_service(args, service, config, store):
     state = service.snapshot()["state"]
     if any(role not in state["origins"].get(name, {}).get("roles", []) for name, role in config["roles"].items()):
         raise Unavailable("身份登记未完成，请重跑 init")
-    if args.action in {"environment-save", "resource-map-save", "storage-domain-register", "storage-domain-merge"}:
+    if args.action in {"environment-save", "resource-map-save", "storage-domain-register", "storage-domain-merge", "capability-verifier-save"}:
         from pool.packages import strict_json
         body = strict_json(args.config.read_bytes())
         if not isinstance(body, dict) or "request_id" in body:
