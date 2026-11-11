@@ -296,6 +296,17 @@ class EnvironmentTests(unittest.TestCase):
             engine.action(before, {"payload": p, "event_id": "replay"}, {"now": time.time(), "phase": "running"})
         self.assertEqual(before["security"]["execution"]["resource_mappings"].keys(), self.data["resource_mappings"].keys())
 
+    def test_registering_an_environment_raises_the_reader_floor_and_never_lowers_it(self):
+        fmt = lambda: self.state["pilot"]["format"]
+        self.assertLess(fmt().get("min_reader", 1), 6)
+        self.register("first", [ASSISTANT])
+        self.assertEqual(fmt()["min_reader"], 6)
+        self.state["pilot"]["format"]["min_reader"] = 7  # as written by the task workflow features
+        self.register("second", [OTHER])
+        self.assertEqual(fmt()["min_reader"], 7)
+        import 协作安全
+        self.assertEqual(协作安全.check(self.state), 5)
+
     def test_environment_and_mapping_views_hide_paths_and_foreign_owners(self):
         self.register("shared", [ASSISTANT, "foreign-window"])
         self.mapping("shared", self.root / "private-device-path")
