@@ -113,6 +113,8 @@ def document():
     paths["/v1/ai-invite-info"] = {"get": _operation("凭邀请链接中的证明读取邀请", "inviteProof", parameters=[_query("invite_id", True)],
                                                      tags=["enrollment"])}
     paths["/v1/service-status"] = {"get": _operation("服务阶段", "windowToken", tags=["service"])}
+    paths["/metrics"] = {"get": _operation("运行指标，Prometheus 文本格式；须为抓取令牌或系统管理员令牌", "metricsToken",
+                                           "text/plain; version=0.0.4; charset=utf-8", tags=["service"])}
     paths["/readyz"] = {"get": _operation("是否可接收请求；维护阶段返回 503", None, tags=["service"])}
     paths["/healthz"] = {"get": _operation("存活检查，仅局域网 TLS 模式提供", None, tags=["service"])}
 
@@ -128,7 +130,8 @@ def document():
             "securitySchemes": {"windowToken": bearer("已登记窗口或人员的令牌"),
                                 "verifierToken": bearer("管理员登记的独立探测凭据，格式 <verifier_id>.<secret>"),
                                 "enrollmentToken": bearer("ai-prepare 回执中的待激活令牌"),
-                                "inviteProof": bearer("邀请链接中的专用证明")},
+                                "inviteProof": bearer("邀请链接中的专用证明"),
+                                "metricsToken": bearer("taskpool.py metrics-token 生成的抓取令牌，或系统管理员令牌")},
             "parameters": {"ReportedAt": {"name": "X-TaskPool-Reported-At", "in": "header", "required": False,
                                           "schema": {"type": "string", "maxLength": 40}, "description": "带时区的 ISO 时间"}},
             "responses": {"Rejected": {"description": "拒绝或错误：JSON 对象，含 status 与 message", "content": {"application/json": {

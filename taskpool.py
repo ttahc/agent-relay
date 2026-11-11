@@ -119,6 +119,7 @@ def build_parser():
     add.add_argument("--input", type=Path, required=True)
     add.add_argument("--criterion", action="append", required=True)
     commands.add_parser("init-admin", help="初始化 admin 并仅向本机操作者输出其访问令牌")
+    commands.add_parser("metrics-token", help="生成 /metrics 抓取令牌（仅保存 SHA256，替换旧令牌，不写账本，服务运行时也可执行）")
     migrate = commands.add_parser("upgrade-migrate", help="迁移旧卷并将迭代任务设为待启动")
     migrate.add_argument("--task", default="T02")
     migrate.add_argument("--upgrade", required=True)
@@ -349,6 +350,12 @@ def main():
         store = state_path(args.store)
         if args.action == "upgrade-control":
             return upgrade_control(args, store)
+        if args.action == "metrics-token":
+            from pool.metrics import issue
+            if not safe(store, "repo.json").exists():
+                raise ClientError("试用库尚未初始化")
+            emit({"token": issue(store), "use": "GET /metrics 时以 Authorization: Bearer <token> 提交；再次运行会替换旧令牌"})
+            return 0
         if args.action == "init":
             store.mkdir(parents=True, exist_ok=True)
         with exclusive(store):

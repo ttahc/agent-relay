@@ -103,6 +103,8 @@ class Server(ThreadingHTTPServer):
         self.sessions = DurableSessions(service)
         self.csrf_key = self.sessions.csrf_key
         self.request_slots = BoundedSemaphore(24)
+        from .metrics import WriteTimer
+        self.write_timer = WriteTimer()
         self.slot = local()
         self.wakeups = Wakeups()
         self.lifecycle.listeners.append(self.wakeups.notify)
@@ -290,6 +292,11 @@ class Handler(BaseHTTPRequestHandler):
             with service.request_identity(lambda: self.server.sessions.actor(web.session_id(self), service),
                                           lambda: getattr(self, 'web_supersedes_request_id', None)):
                 return web.dispatch(self, method, target)
+        if method == "GET" and self.path == "/metrics":
+            from . import metrics
+            if not metrics.allowed(self):
+                raise ClientError("指标仅对系统管理员开放", 403)
+            return 200, metrics.render(self.server), metrics.KIND
         if self.server.tls and method == "GET" and self.path == "/healthz":
             with service.lock:
                 service.snapshot()
@@ -447,9 +454,11 @@ class Handler(BaseHTTPRequestHandler):
         self.handle_api("GET")
 
     def do_POST(self):
+        started = time.monotonic()
         try:
             self.handle_api("POST")
         finally:
+            self.server.write_timer.record(time.monotonic() - started)
             self.server.wakeups.ledger_changed(self.server.service)
 
     def do_HEAD(self):

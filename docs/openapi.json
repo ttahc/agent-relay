@@ -43,6 +43,11 @@
         "scheme": "bearer",
         "type": "http"
       },
+      "metricsToken": {
+        "description": "taskpool.py metrics-token 生成的抓取令牌，或系统管理员令牌",
+        "scheme": "bearer",
+        "type": "http"
+      },
       "verifierToken": {
         "description": "管理员登记的独立探测凭据，格式 <verifier_id>.<secret>",
         "scheme": "bearer",
@@ -85,6 +90,34 @@
         },
         "security": [],
         "summary": "存活检查，仅局域网 TLS 模式提供",
+        "tags": [
+          "service"
+        ]
+      }
+    },
+    "/metrics": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain; version=0.0.4; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "metricsToken": []
+          }
+        ],
+        "summary": "运行指标，Prometheus 文本格式；须为抓取令牌或系统管理员令牌",
         "tags": [
           "service"
         ]

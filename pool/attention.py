@@ -128,6 +128,28 @@ def reminders(service, state, entries, actor, now=None):
     return sorted(found, key=lambda row: (row["since"], row["type"], row["task_id"]))
 
 
+def totals(service, state, entries, now=None):
+    """How many reminders are open across the whole service, by kind, counting each subject once."""
+    notices = getattr(service, "notices", None)
+    from .round_service import execution_settings
+    counts = dict.fromkeys(KINDS, 0)
+    if notices is None or not rules.enabled(state):
+        return counts
+    now = time.time() if now is None else now
+    known, contacts = times(entries), notices.contacts()
+    for task in state["tasks"].values():
+        if not rules.task_project(task):
+            continue
+        since, touched = known.get(task["task_id"], (None, None))
+        counts["task-unclaimed"] += bool(_claimable(task) and since and now - since >= UNCLAIMED_SECONDS)
+        for claim in rules.active_claims(state, task["task_id"]):
+            heard = last_contact(service, state, claim["origin"], contacts)
+            counts["claim-silent"] += bool(execution_settings(state, claim["origin"])["heartbeat"] and heard and
+                                           now - heard >= SILENT_SECONDS)
+            counts["claim-stalled"] += bool(touched and now - touched >= STALLED_SECONDS)
+    return counts
+
+
 def describe(row):
     hours = row["seconds"] // 3600
     span = f"{hours} 小时" if hours else f"{max(1, row['seconds'] // 60)} 分钟"

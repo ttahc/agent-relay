@@ -11,7 +11,7 @@ from pool.privacy import check_release
 
 ROOT = Path(__file__).resolve().parent
 FILES = [".gitignore", "LICENSE", "README.md", "build.py", "taskpool.py", "pool/__init__.py", "pool/constants.py", "pool/task_state.py", "pool/task_views.py", "pool/reads.py", "pool/task_plans.py",
-         "pool/httpd.py", "pool/openapi.py", "pool/attention.py", "pool/packages.py", "pool/service.py", "pool/storage.py", "pool/web.py",
+         "pool/httpd.py", "pool/openapi.py", "pool/attention.py", "pool/metrics.py", "pool/packages.py", "pool/service.py", "pool/storage.py", "pool/web.py",
          "pool/accounts.py", "pool/auth.py", "pool/round_service.py", "pool/round_web.py",
          "pool/round_projects.py", "pool/round_projects_web.py", "pool/account_projects.py",
          "pool/delegation.py", "pool/delegation_pages.py", "pool/invite_links.py",
