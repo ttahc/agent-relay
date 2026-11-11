@@ -59,6 +59,7 @@ READ_API = {
     "board": (None, None, "text/markdown; charset=utf-8", False),
     "projects": (None, None, JSON, False),
     "executors": (None, None, JSON, False),
+    "nodes": (None, None, JSON, False),
     "identity": (None, None, JSON, False),
     "upgrade": (None, None, JSON, False),
     "invitations": (None, None, JSON, True),

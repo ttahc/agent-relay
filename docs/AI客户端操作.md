@@ -188,6 +188,12 @@ python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential resourc
 
 对应接口为 `GET /v1/wait?cursor=<上次回执的 cursor>&timeout=<0 至 50>`，回执含 `cursor`、`changed`、`events`。不带 `cursor` 或游标已不是当前值时立即返回。服务在 `features` 中声明 `wait`；旧服务没有此声明，命令会提示改用 `poll`。`run` 自动执行循环在服务支持时同样改为等待事件，不支持时保持原来的定时查询。
 
+## 节点总览（nodes）
+
+    python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential nodes
+
+`nodes` 返回当前窗口可见的执行环境、平台和窗口：`summary` 是窗口数、在线数和各平台计数，`environments` 是可见的执行环境及其窗口，`windows` 逐个给出平台、责任人、联系状态 `presence`、活动任务和所在环境，`unplaced` 是没有绑定启用环境的窗口。别的窗口的执行环境和资源占用数不会返回。只读，不改变任何状态。
+
 ## 反馈与看板
 
     python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential feedback --project demo-project --task T1001 --kind issue --title "问题标题" --details "实际观察" --impact "对工作的影响" --evidence "可复核的证据位置"
