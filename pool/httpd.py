@@ -14,6 +14,7 @@ from threading import BoundedSemaphore, local
 from urllib.parse import parse_qs, urlsplit
 
 from . import project_capabilities, round_service, round_web, web, window_entries
+import 协作升级 as rules
 from . import __version__
 from . import ROOT
 from .packages import ClientError, MAX_JSON, strict_json
@@ -28,7 +29,8 @@ PRIVATE_V4 = tuple(map(IPv4Network, ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0
 
 
 JSON = "application/json; charset=utf-8"
-ROUND_WRITES = frozenset({"person-invite", "token-prepare", "notices-poll", "notice-ack", "notice-retry", "runner-heartbeat"})
+ROUND_WRITES = frozenset({"person-invite", "token-prepare", "notices-poll", "notice-ack", "notice-retry", "runner-heartbeat",
+                          "push-config"})
 
 
 def whole_query(query):
@@ -52,6 +54,7 @@ READ_API = {
     "openapi": (None, None, JSON, False),
     "attention": (None, None, JSON, True),
     "agent-cards": (None, None, JSON, False),
+    "push-config": (None, None, JSON, True),
     "post-completion": ({"task_id"}, one_value("task_id"), JSON, True),
     "communication": ({"project", "task_id", "q"}, whole_query, JSON, True),
     "execution": ({'task_id', 'claim_id', 'action_id', 'executor_id'}, whole_query, JSON, False),
@@ -110,6 +113,10 @@ class Server(ThreadingHTTPServer):
         self.wakeups = Wakeups()
         self.lifecycle.listeners.append(self.wakeups.notify)
         super().__init__(("0.0.0.0" if tls else "127.0.0.1", port), Handler)
+        self.push = getattr(service, "push", None)
+        if self.is_round and self.push is not None:
+            from .push import start
+            self.push_thread = start(self)
 
     def process_request(self, request, address):
         if not self.request_slots.acquire(blocking=False):
@@ -516,6 +523,13 @@ def round_write(handler, action):
             with service.db:
                 service.notices.pulse(actor)
             return 200, {"status": "received"}, JSON
+        if action == "push-config":
+            if (rules.identity(state, actor) or {}).get("kind") != "executor":
+                raise ClientError("只有 AI 窗口可以登记回调地址", 403)
+            with service.db:
+                value = service.push.save(actor, body)
+            handler.server.wakeups.notify()
+            return 200, value, JSON
         if action == "token-prepare":
             status, value = round_service.prepare_token(service, actor, body)
             return status, value, JSON

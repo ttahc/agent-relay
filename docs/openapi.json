@@ -3495,6 +3495,82 @@
         ]
       }
     },
+    "/v1/push-config": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "读取 push-config",
+        "tags": [
+          "read"
+        ],
+        "x-round-only": true
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 push-config（不记入请求日志）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": false,
+        "x-round-only": true
+      }
+    },
     "/v1/receipt": {
       "get": {
         "parameters": [

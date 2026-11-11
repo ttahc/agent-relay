@@ -95,18 +95,18 @@ def document():
     known = write_fields()
     reported = {"$ref": "#/components/parameters/ReportedAt"}
     for name in sorted(PUBLIC_ACTIONS):
-        paths["/v1/" + name] = {"post": _operation(
+        paths.setdefault("/v1/" + name, {})["post"] = _operation(
             "写入 " + name + "（记入请求日志，可用原 request_id 与原请求体重试）", "windowToken", parameters=[reported],
-            body=_body(*known[name]) if name in known else _body(), tags=["write"], extra={"x-journaled": True})}
+            body=_body(*known[name]) if name in known else _body(), tags=["write"], extra={"x-journaled": True})
     for name in sorted(httpd.ROUND_WRITES):
-        paths["/v1/" + name] = {"post": _operation("写入 " + name + "（不记入请求日志）", "windowToken", body=_body(),
-                                                  tags=["write"], extra={**round_only, "x-journaled": False})}
+        paths.setdefault("/v1/" + name, {})["post"] = _operation("写入 " + name + "（不记入请求日志）", "windowToken", body=_body(),
+                                                  tags=["write"], extra={**round_only, "x-journaled": False})
     for name in sorted(project_capabilities.PROBE_WRITES):
-        paths["/v1/" + name] = {"post": _operation("独立探测端写入 " + name, "verifierToken", body=_body(), tags=["probe"],
-                                                  extra={"x-journaled": True})}
+        paths.setdefault("/v1/" + name, {})["post"] = _operation("独立探测端写入 " + name, "verifierToken", body=_body(), tags=["probe"],
+                                                  extra={"x-journaled": True})
     for name in sorted(round_service.BOOTSTRAP):
-        paths["/v1/" + name] = {"post": _operation("窗口接入 " + name, "enrollmentToken" if name == "ai-activate" else None,
-                                                  body=_body(), tags=["enrollment"], extra=round_only)}
+        paths.setdefault("/v1/" + name, {})["post"] = _operation("窗口接入 " + name, "enrollmentToken" if name == "ai-activate" else None,
+                                                  body=_body(), tags=["enrollment"], extra=round_only)
     paths["/v1/window-apply"] = {"post": _operation("凭平台接入点的申请码提交申请或查询结果", None,
                                                     body={"required": True, "content": {"application/json": {"schema": {"type": "object", "description": OPEN}}}},
                                                     tags=["enrollment"], extra=round_only)}

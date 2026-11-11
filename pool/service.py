@@ -104,6 +104,8 @@ class Service:
         initialize_safety(self.db)
         self.passwords = Passwords(self.db, self.lock, self.accounts)
         self.notices = round_service.Notices(self.db)
+        from .push import Push
+        self.push = Push(self.db)
         snap = self.snapshot()
         fmt = snap["state"]["pilot"].get("format")
         from 协作安全 import READER

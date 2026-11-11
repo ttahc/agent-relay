@@ -59,8 +59,13 @@ def features(r, argument):
         result['features']['wait'] = True
         result['features']['window-apply'] = True
         result['features']['attention'] = True
+        result['features']['push'] = True
         result['wait'] = {'max_seconds': wakeups.MAX_HOLD}
     return result
+
+
+def push_config(r, argument):
+    return r.service.push.status(r.actor)
 
 
 def attention(r, argument):
@@ -449,7 +454,7 @@ def stored_file(r, argument):
 
 
 ROUTES = {
-    "features": features, "openapi": openapi, "attention": attention, "execution": execution_view, "post-completion": post_completion, "communication": communication, "window-impact": window_impact,
+    "features": features, "openapi": openapi, "attention": attention, "push-config": push_config, "execution": execution_view, "post-completion": post_completion, "communication": communication, "window-impact": window_impact,
     "capability-requests": capability_requests, "cleanup": cleanup, "invitations": invitations, "runner": runner,
     "notices": notices, "collaboration": collaboration, "sheet": sheet, "tasks": tasks, "task-options": task_options,
     "overview": overview, "activity": activity, "project-cards": project_cards, "project": project,
@@ -460,7 +465,7 @@ ROUTES = {
     "account-table": account_table, "accounts": accounts, "detail": detail, "task": task, "board": board,
     "artifact": stash_artifact,
 }
-ROUND_ONLY = {"invitations", "runner", "notices", "collaboration", "attention"}
+ROUND_ONLY = {"invitations", "runner", "notices", "collaboration", "attention", "push-config"}
 
 
 def read(service, snap, actor, route, argument=None):

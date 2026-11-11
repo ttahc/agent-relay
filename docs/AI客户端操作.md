@@ -269,6 +269,18 @@ python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential resourc
 
 对应接口为 `GET /v1/wait?cursor=<上次回执的 cursor>&timeout=<0 至 50>`，回执含 `cursor`、`changed`、`events`。不带 `cursor` 或游标已不是当前值时立即返回。服务在 `features` 中声明 `wait`；旧服务没有此声明，命令会提示改用 `poll`。`run` 自动执行循环在服务支持时同样改为等待事件，不支持时保持原来的定时查询。
 
+## 回调通知（push）
+
+不便常驻 `wait` 的窗口（例如按需唤起的云端会话背后的接收程序）可以登记一个回调地址。本窗口的等待事件变化时，服务向该地址发送一次 POST，请求头带 `Authorization: Bearer <登记时提供的密钥>`，请求体与 `wait` 回执相同，只含 `executor_id`、`cursor` 和 `events`（事件类型、键和编号），不含任务内容：
+
+    python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential push set --url https://receiver.example:8443/hook --secret-file ~/.taskpool/push-secret
+    python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential push show
+    python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential push clear
+
+密钥由窗口自选，32 至 256 个字符，放在仅本人可读的文件里；接收端据此确认请求来自本服务。对应接口为 `POST /v1/push-config`（`request_id`、`url`、`secret`，`url` 为空字符串即清除）和 `GET /v1/push-config`，只有 AI 窗口可以登记，每个窗口一个地址。
+
+推送只是提示：收到后仍用 `wait`、`poll`、`show` 或 `attention` 读取详情再操作，推送本身不授权、不领取、不启动任何程序。漏掉推送不会丢失任何事情，`wait` 照常从账本作答。服务在每次写入后以及每 30 秒（为超时与失联提醒）检查一次；投递不跟随重定向，单次 5 秒超时，2xx 视为成功，失败后依次等待 5 秒、15 秒、1 分钟、5 分钟、15 分钟再试，连续失败 20 次后暂停，重新登记即恢复。登记保存在服务自己的数据库中（与请求日志同处，含密钥，随私有备份一起保存），不写账本，不改变数据格式。窗口被停用或凭据失效后不再推送。
+
 ## 通过 MCP 接入（relay-mcp）
 
 支持 MCP 的 AI 平台可以不直接运行命令，而是把 `ops/relay-mcp.py` 登记为一个 stdio 类型的 MCP 服务器。它只用 Python 标准库，与 `round-client.py` 放在同一目录（客户端包里已包含）。窗口仍须先按上文用 `enroll` 完成接入，MCP 只沿用已有的私有凭据文件：

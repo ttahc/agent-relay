@@ -1932,6 +1932,13 @@ def build_parser():
     feedback_update.add_argument("--limits")
     delegates = commands.add_parser("delegations", help="查看当前窗口的委托范围、期限与状态")
     delegates.add_argument("--project")
+    push = commands.add_parser("push", help="登记、查看或清除回调地址：事件变化时服务主动 POST 通知，内容只含事件标识")
+    push_commands = push.add_subparsers(dest="push_action", required=True)
+    push_set = push_commands.add_parser("set", help="登记回调地址与本窗口自选的密钥（服务以 Bearer 方式带上）")
+    push_set.add_argument("--url", required=True)
+    push_set.add_argument("--secret-file", required=True, help="仅本人可读的文件，内含 32 至 256 字符的密钥")
+    push_commands.add_parser("show", help="查看登记状态与最近一次投递结果")
+    push_commands.add_parser("clear", help="清除回调地址")
     commands.add_parser("attention", help="查看需要你处理的超时与失联提醒：久无人领取、心跳中断、领取后久无进展；只读")
     commands.add_parser("nodes", help="查看可见的执行环境、平台和窗口，以及各自的在线与任务情况")
     board = commands.add_parser("board", help="读取 Markdown 看板")
@@ -2037,6 +2044,18 @@ def delegation_records(state, api, args):
     return value
 
 
+def push_config(state, api, args):
+    if args.push_action == "show":
+        return api.call("push-config", state.data["token"])
+    if args.push_action == "clear":
+        return api.call("push-config", state.data["token"], {"url": "", "secret": ""})
+    path = Path(args.secret_file).expanduser()
+    if path.is_symlink() or not path.is_file() or (os.name != "nt" and path.stat().st_mode & 0o077):
+        raise ValueError("回调密钥须放在仅本人可读的普通文件中")
+    secret = path.read_text(encoding="utf-8").strip()
+    return api.call("push-config", state.data["token"], {"url": args.url, "secret": secret})
+
+
 def read_board(state, api, args):
     value = api.call("board", state.data["token"], response_format="text")
     if args.output:
@@ -2110,6 +2129,7 @@ SERVICE_COMMANDS = {
     "board": lambda state, api, args: read_board(state, api, args),
     "nodes": lambda state, api, args: api.call("nodes", state.data["token"]),
     "attention": lambda state, api, args: api.call("attention", state.data["token"]),
+    "push": push_config,
     "retry": lambda state, api, args: durable_write(state, api),
     "poll": lambda state, api, args: poll(state, api),
     "configure": lambda state, api, args: configure_runner(state, api, args),
