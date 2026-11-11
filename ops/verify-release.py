@@ -14,13 +14,13 @@ import uuid
 
 
 ROOT = Path(__file__).resolve().parents[1]
-FAST = ("build", "verify_privacy", "verify_feedback_move", "verify_account_projects",
+FAST = ("build", "verify_feedback_sections", "verify_direct_completion", "verify_direct_completion_ui", "verify_post_completion", "verify_task_communication", "verify_workflow_client", "verify_workflow_integration", "verify_privacy", "verify_feedback_move", "verify_account_projects",
         "verify_v030_ux", "verify_v030_windows", "verify_v030_continuity", "verify_v030_identity",
         "verify_v030_review_read", "verify_v030_badges_history", "verify_release_runner",
         "verify_v030_credential_recovery", "verify_v030_input_packages", "verify_v030_r2_safety",
         "verify_r2_execution", "verify_environment_domains", "verify_r2_resume_segments", "verify_v030_resume_ui", "verify_v030_r2_client", "verify_v030_r2_ui", "verify_v030_execution_projection_ui", "verify_v030_review_mode_ui",
         "verify_v030_ux_readiness", "verify_v030_workspace_refresh", "verify_v030_post_recovery",
-        "verify_v042_fixes", "verify_v042_wait", "verify_window_applications", "verify_nodes_overview")
+        "verify_v042_fixes", "verify_v042_wait", "verify_window_applications", "verify_nodes_overview", "verify_workbench_wait")
 RELEASE = ("build", "verify", "verify_upgrade", "verify_round") + FAST[1:]
 REPORTS = {"verify", "verify_upgrade", "verify_round"}
 KNOWN = set(RELEASE) | {"verify_delegation", "verify_delegation_scope_regression", "verify_release_runner"}

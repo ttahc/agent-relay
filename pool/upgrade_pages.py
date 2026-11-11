@@ -209,6 +209,7 @@ def capability_page(actor, profile, data):
 
 
 def contract_fields(project, spec=None, resources=None, dependencies=None, round_mode=False, actor=""):
+    creating = spec is None
     spec = spec or {"iteration": {"goal": "", "previous": [], "next": []}, "delivery": "",
                     "requirements": [], "review_mode": "source", "user_basis": ""}
     requirements = "\n".join(" | ".join((r["id"], r["kind"], r["value"], "必需" if r["required"] else "优选", r["evidence"]))
@@ -225,7 +226,10 @@ def contract_fields(project, spec=None, resources=None, dependencies=None, round
                    + json_field("dispatch_capabilities", "指定能力组，无则填 []", selection_data["capabilities"])
                    + selection("dispatch_automation", "执行方式", [("notify", "仅通知"), ("auto", "按授权自动领取并执行")],
                                selection_data["automation"]))
-    return (pages.hidden("project_id", project)
+    completion = (selection("completion_policy", "完成策略（创建后不可变更）", [
+        ("review-required", "需要验收"), ("executor-direct", "执行者直接完成（不代表独立验收）")]) if creating else
+        '<p class="muted">完成策略（不可变更）：' + ("执行者直接完成（不代表独立验收）" if spec.get("completion_policy") == "executor-direct" else "需要验收") + '</p>')
+    return (completion + pages.hidden("project_id", project)
             + text_field("iteration_goal", "迭代目标", spec["iteration"]["goal"])
             + input_field("iteration_previous", "前序任务（逗号分隔）", ",".join(spec["iteration"]["previous"]), required=False)
             + input_field("iteration_next", "后续任务（逗号分隔）", ",".join(spec["iteration"]["next"]), required=False)

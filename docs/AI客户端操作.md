@@ -250,3 +250,61 @@ python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential resourc
 也可重复运行参数相同的原命令。存在待确认写入时，客户端拒绝用另一项写入覆盖它，读取详情和任务仍然可用。`retry` 重放已保存的请求，不会先取得新版本或重新读取产物；成功后服务返回原回执并解除待确认状态。明确的终局拒绝回执会结束该次请求，之后根据错误修正条件再发新操作。
 
 执行令牌过期或已轮换时，先由对应窗口按平台流程恢复有效凭据，再重试原请求。不要复制其他窗口的凭据，也不要把令牌、邀请码或私钥放进反馈或交付物。
+
+## 完成、完成后复查、沟通与经验（显式工作流）
+
+Windows、macOS、Linux 的同一份 `ops/round-client.py` 使用相同协议，不依赖具体 AI 平台。以下示例使用 `python3`；Windows 可替换为已安装的 `python`。先用 `show T1001` 读取当前任务、领取、范围、修订和真实产物摘要，再准备 JSON 文件。客户端不会猜测检查结果、自动刷新版本后重试或把经验当作授权。
+
+    python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential workflow executor-complete --file ./complete.json
+    python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential workflow close --file ./close.json
+    python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential post-issues T1001
+    python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential communication --project demo-project --task T1001 --q "校验"
+    python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential workflow task-issue-open --file ./issue.json
+    python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential workflow task-issue-review --file ./review.json
+    python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential workflow task-repair-open --file ./repair.json
+    python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential workflow task-message --file ./message.json
+    python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential workflow task-message-status --file ./message-status.json
+    python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential workflow experience-save --file ./experience.json
+    python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential workflow experience-state --file ./experience-state.json
+
+`workflow` 只允许上列九个写入操作；它不是任意 API 调用入口。`post-issues`、`communication` 仅查询，不确认已读、不改变任务或经验。`communication` 的项目、任务、搜索词均可省略，结果始终受当前来源权限限制。`post-issues` 必须指定任务。
+
+新请求先检查服务 `features` 中的 `executor-complete`（直接完成与收口）、`post-completion`（完成后问题与返修）或 `task-communication`（沟通与经验）。未声明支持则停止，不静默降级。已有待确认请求仍通过原请求编号和原字节重试，不能因升级而改成另一操作。
+
+### JSON 字段与真实证据
+
+文件须为不超过 1 MiB 的普通 UTF-8 JSON 对象，不得包含 `request_id`、`_audit`、`op` 或凭据。以下字段清单均为完整业务字段；客户端生成并持久保存 `request_id`。所有版本必须来自当前只读查询，不能填写推测版本。文本证据须是实际观察，不是期望结果。
+
+- `executor-complete`：`claim_id`、`epoch`、`scope_version`、`revision`、`manifest_sha256`、`checks`，可选 `finish`。`checks` 必须显式提供非空数组，每项恰有 `id`、`path`、`sha256`、`note`；路径和摘要必须引用本修订真实输出。仅任务已明确采用 `executor-direct` 策略且当前身份为该领取持有者时可用。`finish: true` 只在已真实停止且资源释放等条件成立时尝试收口，不会伪造停止或释放记录。原独立验收策略仍按原流程办理。
+- `close`：仅 `task_id`。用于已通过检查、实际停止、释放资源并进入待收口的任务。服务端重新核对当前身份与任务状态。
+- `task-issue-open`：`task_id`、`task_version`、`title`、`details`、`evidence`、`visibility`。`visibility` 为 `project` 或 `restricted`。只登记完成后问题，不重开或改写原完成结论。回执给出问题编号；随后用 `post-issues` 读取。
+- `task-issue-review`：`task_id`、`task_version`、`id`、`version`、`verdict`、`reason`、`evidence`。`id`/`version` 为问题记录，`verdict` 为 `evidence`、`repair-required`、`resolved` 或 `declined`。须具有当前复核权限，复核结论和新证据独立保留。
+- `task-repair-open`：`task_id`、`task_version`、`id`、`version`、`reason`、`title`、`brief`、`criteria`、`receiver`、`completion_policy`。`id`/`version` 指原问题；`criteria` 是明确的非空判据数组；`completion_policy` 为 `review-required` 或 `executor-direct`。创建关联返修任务，既有任务和原完成证据不被覆盖；不会自动领取或执行返修任务。可选 `include_original_delivery` 布尔值默认 `false`；只有明确设为 `true` 才把最近完成返修的交付（首轮为原已接受交付）分享为新返修任务的项目可见输入，供新执行者读取。
+- `task-message`：`project_id`、`task_id`、`task_version`、`kind`、`recipient`、`reply_to`、`content`。`kind` 为 `question`、`note`、`blocker`、`conclusion` 或 `request-review`。未指名接收人或未回复已有沟通时分别填空字符串；指名对象必须当前有该任务查看权限，回复编号必须来自同一任务。记录编号由回执给出。
+- `task-message-status`：`project_id`、`id`、`version`、`status`、`evidence`。状态仅显式选择 `received`、`replied`、`executed`、`completed`。只标记沟通事项，绝不等于完成任务、验收或授权；发送回复也不会自动设置这些状态。
+- `experience-save`：`project_id`、`id`、`version`、`source_task`、`source_task_version`、`source_feedback`、`source_feedback_version`、`title`、`conditions`、`method`、`evidence`、`limits`。新记录自行选择稳定编号且 `version` 为 `0`；修订使用查询返回的版本。任务或反馈至少提供一种来源，另一种填空字符串且版本为 `0`。只能保存或修订候选经验；既有来源编号不能更换。必须填写适用条件、方法、证据及局限，经验沉淀不是交付必填步骤。
+- `experience-state`：`project_id`、`id`、`version`、`state`、`reason`。`state` 仅 `confirmed` 或 `retired`，必须由当前项目管理人员本人确认或退役。AI 窗口、委托及其自述都不能代替人员确认。确认前来源版本须仍匹配，来源变化先修订候选经验并重新复核。
+
+例如 `message.json`（编号和版本须替换成当前查询结果）：
+
+```json
+{
+  "project_id": "demo-project",
+  "task_id": "T1001",
+  "task_version": 12,
+  "kind": "question",
+  "recipient": "",
+  "reply_to": "",
+  "content": "输出格式存在两种解释，请确认以哪一项冻结判据为准。"
+}
+```
+
+例如 `close.json`：
+
+```json
+{"task_id": "T1001"}
+```
+
+这些命令不扩大当前账号权限。沟通和经验不继承委托权限；受限反馈不会因为关联公开任务而通过经验检索公开。经验的来源编号、版本、条件和局限一直保留。已退役经验是历史记录，不能当作当前有效操作指令。
+
+同一写入命令丢响应时，重复相同操作与同一路径会重放已经冻结的原 JSON，即使文件后来被修改也不会替换原请求。用 `pending` 查看，用 `retry` 恢复；未决请求存在时不能用另一操作覆盖。明确终局拒绝后才根据实际原因修正条件并发起新的请求。`wait` 仍然只提供提示，不自动执行上述任何操作。

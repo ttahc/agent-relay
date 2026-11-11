@@ -448,7 +448,8 @@ def action(state, env, context):
             "physical_paths" in proof or "descendant_identities" in proof for proof in p.get("resource_proofs", {}).values())):
         # Persist a reader floor: older binaries replay stored effects but do not
         # understand these collision proofs, so they must refuse this store.
-        state["pilot"] = {**state["pilot"], "format": {**state["pilot"]["format"], "min_reader": 6}}
+        state["pilot"] = {**state["pilot"], "format": {**state["pilot"]["format"],
+                                       "min_reader": max(6, state["pilot"]["format"].get("min_reader", 1))}}
 
 
 def _apply(state, p, actor, now, event_id):

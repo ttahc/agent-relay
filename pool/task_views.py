@@ -39,7 +39,7 @@ def delivery_reviews(service, state, task, claims, entries=None):
             if entries is None:
                 entries = service.snapshot().get("entries", [])
             event = next((entry for entry in entries if entry.get("type") == "decision" and entry.get("result") == "applied" and
-                          entry.get("command") == "review" and entry.get("key") == str(review.get("origin")) + "/" + str(acceptance_id) and
+                          entry.get("command") == ("executor_complete" if review.get("completion_kind") == "executor-direct" else "review") and entry.get("key") == str(review.get("origin")) + "/" + str(acceptance_id) and
                           entry.get("origin_id") == review.get("origin") and
                           (review.get("seq") is None or entry.get("ledger_seq") == review["seq"]) and
                           any(effect.get("path") == ["acceptances", acceptance_id] and effect.get("value") == review
@@ -50,7 +50,8 @@ def delivery_reviews(service, state, task, claims, entries=None):
                                        isinstance(check["evidence"].get("note"), str) and check["evidence"]["note"]))
             request = (event or {}).get("request", {})
             reason = request.get("reason") if isinstance(request.get("reason"), str) and request["reason"] else "\n".join(notes)
-            metadata = {"acceptance_id": acceptance_id, "failed_criteria": failed, "reason": reason,
+            metadata = {"completion_kind": review.get("completion_kind", "review"), "independent": review.get("independent"),
+                        "acceptance_id": acceptance_id, "failed_criteria": failed, "reason": reason,
                         "reviewer": request.get("actor") or review.get("origin"),
                         "at": (event or {}).get("committed_utc"), "source_event": (event or {}).get("key")}
             result.append({"claim_id": claim["claim_id"], "revision": name, "manifest": deepcopy(delivery.get("manifest")),
@@ -69,6 +70,7 @@ def task_view(service, state, task, actor):
     project = rules.project_record(state, spec["project_id"]) if spec else None
     return {"task": {**task, "project_name": project["name"]} if project else task,
             "stage": stage(task, active_claim(state, task), state),
+            "direct_close_allowed": rules.direct_closer(state, task, actor),
             'execution_status': execution_status(state, active_claim(state, task)),
             "claims": deepcopy(permitted),
             'execution_protocol': 5 if security_schema(state) == 5 else None,
@@ -166,6 +168,8 @@ def feedback_due(service, state, actor, project=None):
 
 def task_summary(task):
     result = {k: task[k] for k in ('task_id', 'title', 'status', 'stage', 'version', 'scope_version', 'priority',
-                'project_name', 'qualification', 'holder', 'holder_window', 'holder_window_name', 'receiver') if k in task}
+                'project_name', 'qualification', 'holder', 'holder_window', 'holder_window_name', 'receiver',
+                'completion_kind', 'independent', 'completed_by', 'direct_close_allowed') if k in task}
     result['project_id'] = rules.task_project(task)
+    result['completion_policy'] = rules.completion_policy(task)
     return result

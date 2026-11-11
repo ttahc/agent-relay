@@ -81,6 +81,7 @@ def overview_tab(project, tasks, activity):
     if {"manager", "receiver"} & set(project["roles"]):
         links += f'<a class="primary" data-new-task href="/tasks/new?{query}">新建任务</a>'
     links += f'<a class="secondary" href="/collaboration?{query}">反馈与决定</a>'
+    links += f'<a class="secondary" href="/communication?{e(query, quote=True)}">沟通与经验</a>'
     recent = ""
     for item in [row for row in activity if row["project"] == project["id"]][:8]:
         who = wb.window_text(item)

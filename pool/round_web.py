@@ -20,7 +20,7 @@ import 协作升级 as rules
 PATHS = {"/password", "/password/setup", "/password/reset", "/accounts/reset", "/accounts/projects", "/invitations",
          "/assistants",
          "/tokens/rotate", "/permissions", "/assets/round.js", "/assets/workbench.js", "/assets/workbench.css", "/collaboration",
-         "/release-status", "/workspace-state"}
+         "/release-status", "/workspace-state", "/communication", "/post-completion"}
 WORKBENCH_JS = Path(__file__).with_name("workbench.js").read_bytes()
 WORKBENCH_CSS = Path(__file__).with_name("workbench.css").read_bytes()
 POST_FORM = re.compile(rb"(<form\b[^>]*\bmethod=[\"']post[\"'][^>]*>)", re.IGNORECASE)
@@ -501,6 +501,12 @@ def route(handler, method, target, current, actor):
         return invitations(handler, method, actor, target)
     if path == "/tokens/rotate":
         return token_rotation(handler, method, actor, target)
+    if path == "/communication":
+        from .task_communication_pages import dispatch
+        return dispatch(handler, method, target, actor)
+    if path == "/post-completion":
+        from .post_completion_pages import dispatch
+        return dispatch(handler, method, target, actor)
     if path == "/collaboration":
         from .round_projects_web import dispatch
         return dispatch(handler, method, target, actor)

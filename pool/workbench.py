@@ -36,7 +36,7 @@ EVENTS = {"propose": "提出任务", "register": "登记任务", "claim": "领�
 TIERS = (("manager,executor,receiver", "项目管理员"), ("executor,receiver", "贡献者"),
          ("reporter", "报告者"), ("observer", "观察者"))
 NAV_GROUPS = (("工作", (("/", "我的工作"), ("/board", "看板"), ("/list", "列表"))),
-              ("协作", (("/projects", "项目"), ("/collaboration", "反馈与决定"), ("/audit", "动态"), ("/release-status", "版本复验"))),
+              ("协作", (("/projects", "项目"), ("/collaboration", "反馈与决定"), ("/communication", "沟通与经验"), ("/audit", "动态"), ("/release-status", "版本复验"))),
               ("AI 助理", (("/executors", "窗口管理"),)))
 TASK_VIEWS = {"/", "/board", "/list"}
 ACCOUNT_PAGES = ("/accounts", "/invitations", "/permissions", "/password")
@@ -270,7 +270,7 @@ def hidden_form(move, action, values):
 
 
 def claim_block(task, actor):
-    if task["receiver"] == actor and not (spec_of(task).get("review_mode") == "user" and (spec_of(task).get("user_basis") or "").strip()):
+    if task["receiver"] == actor and not pages.executor_direct(task) and not (spec_of(task).get("review_mode") == "user" and (spec_of(task).get("user_basis") or "").strip()):
         return "你是本任务的验收人，不能同时执行"
     quality = task.get("qualification") or {}
     if not quality.get("eligible"):
@@ -337,6 +337,8 @@ def field_text(task):
 
 
 def column_title(task):
+    if task["stage"] == "review" and pages.executor_direct(task):
+        return "待执行者确认完成"
     return ARCHIVE.get(task["stage"]) or COLUMN_NAME[column_of(task)]
 
 
@@ -464,6 +466,8 @@ def list_page(actor, data, filters, activity):
 
 def todo_reason(task, actor, roles):
     stage = task["stage"]
+    if stage == "review" and pages.executor_direct(task):
+        return "待你凭交付证据确认完成" if task.get("holder") == actor else ""
     if stage == "review" and task["receiver"] == actor and (task.get("holder") != actor or
             spec_of(task).get("review_mode") == "user" and (spec_of(task).get("user_basis") or "").strip()):
         return "待你提交验收结论"
@@ -471,11 +475,17 @@ def todo_reason(task, actor, roles):
         return "被退回，等你修改"
     if stage == "waiting" and "manager" in roles.get(project_of(task), set()):
         return "等你开放"
+    if stage == "pending_close" and pages.executor_direct(task) and task.get("direct_close_allowed"):
+        return "等你收口并归档"
     if stage == "pending_close" and task["receiver"] == actor:
         return "等你归档"
     if stage in {"cancel_pending", "paused"} and task.get("holder") == actor:
         return "请确认已停止或继续"
     if stage == "accepted" and task.get("holder") == actor:
+        if task.get("completion_kind") == "executor-direct":
+            return "执行者已确认完成，未做独立审查；请确认执行已停止"
+        if pages.executor_direct(task) and task.get("completion_kind") != "review":
+            return "已确认完成，请确认执行已停止"
         return "已验收，请确认执行已停止"
     if stage == "recovery" and "manager" in roles.get(project_of(task), set()):
         return "恢复待核，等你处置"
@@ -499,7 +509,7 @@ def home_groups(actor, data, filters):
             groups["doing"].append(("", task))
         elif live and owner_of(task) == actor:
             groups["owned"].append((column_title(task), task))
-        elif task["stage"] == "available" and "executor" in roles.get(project_of(task), set()) and task["receiver"] != actor:
+        elif task["stage"] == "available" and "executor" in roles.get(project_of(task), set()) and (task["receiver"] != actor or pages.executor_direct(task)):
             quality = task.get("qualification") or {}
             if quality.get("eligible"):
                 groups["can"].append(("", task))
@@ -537,7 +547,7 @@ def worker_box(actor, view):
         if "executor" not in view["roles"]:
             return ""
         contexts = view.get("execution_contexts", [])
-        receiver_blocks = task["receiver"] == actor and not (spec_of(task).get("review_mode") == "user" and (spec_of(task).get("user_basis") or "").strip())
+        receiver_blocks = task["receiver"] == actor and not pages.executor_direct(task) and not (spec_of(task).get("review_mode") == "user" and (spec_of(task).get("user_basis") or "").strip())
         block = "你是本任务的验收人，不能同时执行" if receiver_blocks else "；".join(view["qualification"]["missing"])
         if block and (receiver_blocks or not contexts):
             return f'<p class="muted-text">暂时不能领取：{e(block)}</p>'
@@ -579,16 +589,16 @@ def worker_box(actor, view):
         return (pages.form("resume", "开始返修", values) if direct or "resume" in allowed else '<p>继续返修需要人员授权。</p>') + handoff_form(values)
     if spec_of(task) and work in {"draft", "revision"} and claim["E"] == {"state": "stopped", "reason": "pause"}:
         return (pages.form("resume", "继续执行", values) if direct or "resume" in allowed else '<p>继续执行需要人员授权。</p>') + handoff_form(values)
-    return ('<p class="muted-text">本次执行已结束，等待验收。</p>' if work == "review" else "") + withdraw
+    return ('<p class="muted-text">本次执行已结束，等待完成确认。</p>' if work == "review" and pages.executor_direct(task) else '<p class="muted-text">本次执行已结束，等待验收。</p>' if work == "review" else "") + withdraw
 
 
-def review_forms(claim, bundle):
+def review_forms(claim, bundle, direct=False, finish=True):
     revision = bundle["revision"]
     values = {"claim_id": claim["claim_id"], "revision": revision["revision"], "manifest_sha256": revision["manifest_sha256"]}
     criteria = revision["criteria"]
     artifacts = [ref for ref in bundle["outputs"] if not ref["path"].endswith("/delivery.json")]
     if not artifacts:
-        return '<p class="form-error" role="status">交付文件未通过复核，当前无法验收。</p>'
+        return '<p class="form-error" role="status">交付文件未通过复核，当前无法确认完成。</p>' if direct else '<p class="form-error" role="status">交付文件未通过复核，当前无法验收。</p>'
     single = len(artifacts) == 1
     options = "".join(f'<option value="{e(json.dumps(ref, ensure_ascii=False), quote=True)}"{" selected" if single else ""}>'
                       f'{e(ref["path"].rsplit("/", 1)[-1])}</option>' for ref in artifacts)
@@ -596,6 +606,12 @@ def review_forms(claim, bundle):
     checks = "".join(f"""<fieldset><legend>{e(c)}</legend>{pages.hidden(f"criterion-{i}", c)}
   <label>核对的文件<select name="artifact-{i}" required>{prompt}{options}</select></label>
   {pages.textarea(f"note-{i}", "核对情况")}</fieldset>""" for i, c in enumerate(criteria))
+    if direct:
+        values.update(epoch=claim["epoch"], scope_version=claim["W"]["scope"])
+        if finish:
+            values["finish"] = "1"
+        return ui.block('执行者确认完成', '<p class="muted-text">执行者完成，未做独立审查。请逐项记录实际完成依据。</p>'
+                        + pages.form("executor-complete", "确认完成并尝试归档" if finish else "确认完成", {**values, "check_count": len(criteria)}, checks))
     accept = pages.form("review", "验收通过并归档", {**values, "check_count": len(criteria), "finish": "1"}, checks)
     failed = "".join(check_box(f"failed-{i}", c, e(c), False) for i, c in enumerate(criteria))
     back = pages.form("return", "退回修改", {**values, "criteria_form": "1"},
@@ -605,12 +621,14 @@ def review_forms(claim, bundle):
 
 def receiver_box(actor, view):
     task, claim = view["task"], view["active"]
+    if pages.executor_direct(task) and (task["receiver"] != actor or claim and claim["origin"] == actor):
+        return ""
     if task["receiver"] != actor:
         return f'<p class="muted-text">等待 {e(task["receiver"])} 验收。</p>' if view["stage"] == "review" else ""
     if task["status"] == "pending_close":
         return pages.form("close", "归档", {"task_id": task["task_id"]})
     if view["stage"] == "accepted":
-        return '<p class="muted-text">已验收，等执行人确认工作已停止后归档。</p>'
+        return '<p class="muted-text">已确认完成，等执行人确认工作已停止后归档。</p>' if pages.executor_direct(task) else '<p class="muted-text">已验收，等执行人确认工作已停止后归档。</p>'
     if not task.get("cancel_requested") and not task.get("accepted") and claim and claim["W"]["state"] == "review":
         latest = next((b for b in view["deliveries"] if b["claim_id"] == claim["claim_id"]
                        and b["revision"]["revision"] == claim["W"]["revision"]), None)
@@ -675,16 +693,16 @@ def sheet(actor, view, brief, events):
     spec = spec_of(task)
     dispatch = spec.get("dispatch") or {}
     stage = view["stage"]
-    column = ARCHIVE.get(stage) or COLUMN_NAME[COLUMN_OF.get(stage, "draft")]
+    column = column_title({**task, "stage": stage})
     view = {**view, "viewer": actor}
     actions = ""
     if not (stage in ARCHIVE or stage in {"completed", "closed_missing", "closed_candidate"}):
-        actions = worker_box(actor, view) + receiver_box(actor, view)
+        actions = worker_box(actor, view) + pages.executor_completion(actor, view) + receiver_box(actor, view)
         if stage == "waiting":
             actions += f'<p class="muted-text">{e(spec.get("hold_reason") or "任务开放后才能领取。")}</p>'
     if stage == "available" and not actions:
         actions = '<p class="muted-text">等待执行者领取。</p>'
-    action_box = f'<section class="actions">{actions}</section>' if actions else ""
+    action_box = f'<section class="actions"><h3>当前可办操作</h3>{actions or "<p class=muted-text>当前没有可办操作，历史记录保留供追溯。</p>"}</section>'
     if view["cancel_note"]:
         action_box = f'<p class="muted-text">取消原因：{e(view["cancel_note"]["text"])}</p>' + action_box
     done = stage in {"completed", "closed_missing", "accepted", "pending_close"}
@@ -694,11 +712,13 @@ def sheet(actor, view, brief, events):
     for bundle in reversed(view["deliveries"]):
         rev = bundle["revision"]
         state = {"review": "待验收", "revision": "已退回", "accepted": "已通过", "withdrawn": "已撤回"}.get(rev["status"], rev["status"])
+        if (bundle.get("review") or {}).get("completion_kind") == "executor-direct":
+            state = "执行者完成，未做独立审查"
+        elif rev["status"] == "review" and pages.executor_direct(task):
+            state = "待完成确认"
         revisions += (f'<div class="rev"><b>{e(rev["revision"].replace("revision-", "修订 "))}</b> <span class="muted-text">{state}</span>'
                       f'{links([ref for ref in bundle["outputs"] if not ref["path"].endswith("/delivery.json")])}</div>')
-    rework = "".join(f'<li>{e(item["criterion"] or "返修项")}：{e(item["description"])} '
-                     f'<span class="muted-text">{"已解决" if item["status"] == "resolved" else "待处理" if item["status"] == "unresolved" else "已结束"}</span></li>'
-                     for item in view["items"])
+    rework = pages.rework_sections(view, "sheet-part", "h3")
     handoffs = links(view["handoffs"])
     claim = view["active"]
     technical = "".join(f"<dt>{k}</dt><dd>{e(str(v))}</dd>" for k, v in (
@@ -718,13 +738,13 @@ def sheet(actor, view, brief, events):
   <header class="sheet-head"><span class="tid">{e(task["task_id"])}</span><span class="pill c-{pill}">{column}</span>
     {f'<span class="flag warn">{FLAG_TEXT[stage]}</span>' if stage in FLAG_TEXT else ""}<a class="sheet-back" href="/board">返回看板</a></header>
   <div class="sheet-body"><div class="sheet-main">
-    <h1>{e(task["title"])}</h1>{action_box}{pages.execution_runtime(view)}{missing}
+    <h1>{e(task["title"])}</h1>{pages.collaboration_links(view)}{pages.completion_notice(view)}{action_box}{pages.execution_runtime(view)}{missing}
     <section class="sheet-part"><h3>说明</h3><p class="brief">{e(brief or "")}</p></section>
     <section class="sheet-part"><h3>完成判据</h3><ul class="crit">{criteria}</ul></section>
     {f'<section class="sheet-part"><h3>输入资料</h3>{links(inputs)}</section>' if inputs else ""}
     {f'<section class="sheet-part"><h3>接续材料</h3>{handoffs}</section>' if handoffs else ""}
-    {f'<section class="sheet-part"><h3>交付修订</h3>{revisions}</section>' if revisions else ""}
-    {f'<section class="sheet-part"><h3>返修记录</h3><ul>{rework}</ul></section>' if rework else ""}
+    {f'<section class="sheet-part"><h3>交付与验收记录</h3>{revisions}</section>' if revisions else ""}
+    {rework}
     {manage_box(view)}
     <section class="sheet-part"><h3>动态</h3><ul class="timeline">{timeline(events) or "<li>暂无记录</li>"}</ul></section>
     <details class="tech"><summary>技术细节</summary><dl>{technical}</dl></details>
@@ -733,7 +753,7 @@ def sheet(actor, view, brief, events):
     <div><span>项目</span>{project}</div>
     <div><span>任务负责人</span>{e(owner_of(task) or "未指定")}</div>
     <div><span>执行人</span>{e(window_text(view) or (claim["origin"] if claim else "未领取"))}</div>
-    <div><span>验收人</span>{e(task["receiver"])}</div>
+    <div><span>{"可选验收人" if pages.executor_direct(task) else "验收人"}</span>{e(task["receiver"])}</div>
     <div><span>谁可以领</span>{e(mode)}</div>
     <div><span>能力要求</span><p class="row">{tags}</p></div>
     <div><span>前置任务</span><p class="row">{deps}</p></div>
@@ -750,7 +770,7 @@ def new_task(actor, projects, project, receivers, capabilities, members, tasks):
     tabs = ('<nav class="seg" aria-label="项目">' + "".join(f'<a data-new-task href="/tasks/new?{e(urlencode({"project": p["id"]}), quote=True)}"{current(p["id"] == project["id"])}>{e(p["name"])}</a>'
                                                           for p in projects) + "</nav>") if len(projects) > 1 else ""
     receiver_candidates = [next((m for m in members if m["identity"] == name), {"identity": name, "name": name}) for name in receivers]
-    receiver = ui.identity_picker("receiver", "验收人", receiver_candidates, receivers[0] if receivers else "") if manager else pages.hidden("receiver", actor)
+    receiver = ui.identity_picker("receiver", "验收人（直接完成任务中为可选验收责任人）", receiver_candidates, receivers[0] if receivers else "") if manager else pages.hidden("receiver", actor)
     people = [m["identity"] for m in members if m.get("kind") == "human" and m["roles"]]
     owner = actor if actor in people else ""
     owner_field = ui.identity_picker("dispatch_owner", "任务负责人", [m for m in members if m["identity"] in people], owner, optional=True)
@@ -775,7 +795,7 @@ def new_task(actor, projects, project, receivers, capabilities, members, tasks):
                 + ui.input_field("cap_new", "新增能力编号（小写英文，例如 markdown）", required=False, size=48) + '</fieldset>'
                 + more + open_now + who)
     return pages.workspace(actor, f'<section class="wb-page"><div class="wb-newtask" id="new-task"><h2>新建任务</h2>{tabs}'
-                           f'<p class="muted-text">项目：{e(project["name"])}</p>{pages.form("register", "创建", contents=controls)}</div></section>')
+                           f'<p class="muted-text">项目：{e(project["name"])}</p>{pages.form("register", "创建", contents=controls + ui.selection("completion_policy", "完成方式（创建后不可变更）", [("review-required", "独立验收后完成"), ("executor-direct", "执行者凭证据直接完成")], "review-required"))}</div></section>')
 
 
 def members_section(data):

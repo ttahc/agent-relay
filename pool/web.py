@@ -333,7 +333,7 @@ def action_body(handler, action):
         if not picked:
             raise ClientError("请勾选至少一条未通过的判据")
         data.update(criterion=picked[0], criteria=picked)
-    if action == "review" and "finish" in data:
+    if action in {"review", "executor-complete"} and "finish" in data:
         data["finish"] = data["finish"] == "1"
     for key in ("version", "scope_version", "epoch"):
         if key in data:
@@ -384,7 +384,7 @@ def action_body(handler, action):
             raise ClientError("有效期格式无效")
         data["expires"] = int(issued) + int(days) * 86400
         data["evidence"] = {"note": data.pop("evidence_note", ""), "sha256": data.pop("evidence_sha256", "")}
-    if action == "review":
+    if action in {"review", "executor-complete"}:
         count = data.pop("check_count", "")
         if not re.fullmatch(r"(?:[1-9]|[12][0-9]|30)", count):
             raise ClientError("验收判据数量无效")

@@ -1356,6 +1356,61 @@ def selected_resources(args):
     return rows
 
 
+WORKFLOW_FEATURES = {
+    "executor-complete": "executor-complete", "close": "executor-complete",
+    "task-issue-open": "post-completion", "task-issue-review": "post-completion", "task-repair-open": "post-completion",
+    "task-message": "task-communication", "task-message-status": "task-communication",
+    "experience-save": "task-communication", "experience-state": "task-communication",
+}
+
+
+def workflow_command(state, api, args):
+    """Submit only explicitly selected workflow operations, preserving exact JSON on retry."""
+    operation = args.operation
+    if operation not in WORKFLOW_FEATURES:
+        raise ValueError("未允许的工作流操作")
+    path = args.file.expanduser().absolute()
+
+    def prepare():
+        require_feature(api, state.data["token"], WORKFLOW_FEATURES[operation])
+        if is_link(path) or not path.is_file() or path.resolve() == state.path.resolve() or path.stat().st_size > 1024 * 1024:
+            raise ValueError("工作流请求须为不超过 1 MiB 的普通 JSON 文件，不能使用凭据文件")
+        raw = path.read_bytes()
+        if len(raw) > 1024 * 1024:
+            raise ValueError("工作流请求超过 1 MiB")
+
+        def unique(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError("工作流请求包含重复 JSON 字段")
+                result[key] = value
+            return result
+
+        def invalid_constant(value):
+            raise ValueError("工作流请求不能包含非有限数字")
+
+        body = json.loads(raw.decode("utf-8-sig"), object_pairs_hook=unique, parse_constant=invalid_constant)
+        if not isinstance(body, dict) or set(body) & ({"request_id", "_audit", "op"} | SECRET_FIELDS):
+            raise ValueError("工作流请求须为 JSON 对象，不得包含 request_id、审计字段或凭据")
+        if operation == "executor-complete" and (not isinstance(body.get("checks"), list) or not body["checks"]):
+            raise ValueError("直接完成须明确提供逐项 checks 及本修订的真实产物证据；不会自动生成检查")
+        return body
+
+    return durable_write(state, api, operation_key("workflow", {"operation": operation, "file": str(path)}), operation, prepare)
+
+
+def workflow_read(state, api, args):
+    if args.action == "post-issues":
+        require_feature(api, state.data["token"], "post-completion")
+        route, query = "post-completion", {"task_id": args.task}
+    else:
+        require_feature(api, state.data["token"], "task-communication")
+        route, query = "communication", {"project": args.project, "task_id": args.task, "q": args.q}
+    query = {key: value for key, value in query.items() if value not in (None, "")}
+    return api.call(route + ("?" + urlencode(query) if query else ""), state.data["token"])
+
+
 def execution_command(state, api, args):
     group, operation = args.action, getattr(args, "operation", None)
     route = {("context", "save"): "context-save", ("segment", "open"): "segment-open",
@@ -1705,6 +1760,15 @@ def build_parser():
     parser.add_argument("--allow-loopback", action="store_true", help="允许隔离测试的 HTTP 回环服务")
     parser.add_argument("--supersedes-request-id", help="修正已终局拒绝后的关联新请求；不会改写旧请求")
     commands = parser.add_subparsers(dest="action", required=True)
+    workflow = commands.add_parser("workflow", help="显式提交完成、完成后复查、任务沟通或经验 JSON；不会自动授权或执行")
+    workflow.add_argument("operation", choices=sorted(WORKFLOW_FEATURES))
+    workflow.add_argument("--file", type=Path, required=True, help="完整 JSON 请求，不含 request_id；待确认时保留原文件内容")
+    communication = commands.add_parser("communication", help="只读检索当前可见的任务沟通与经验")
+    communication.add_argument("--project")
+    communication.add_argument("--task")
+    communication.add_argument("--q", default="")
+    issues = commands.add_parser("post-issues", help="只读查看指定任务完成后的问题、复查与返修关联")
+    issues.add_argument("task")
     create = commands.add_parser("enroll")
     invitation = create.add_mutually_exclusive_group()
     invitation.add_argument("--invite", help="邀请文件路径，- 代表标准输入")
@@ -1969,6 +2033,9 @@ LOCAL_COMMANDS = {
 EXECUTION_COMMANDS = ("execution", "context", "segment", "action", "resource", "fact", "stash")
 # Commands that talk to the service with this window's token; "run" is every remaining one.
 SERVICE_COMMANDS = {
+    "workflow": workflow_command,
+    "communication": workflow_read,
+    "post-issues": workflow_read,
     "whoami": lambda state, api, args: whoami(state, api),
     "rename": lambda state, api, args: rename(state, api, args.name),
     **{name: lambda state, api, args: execution_command(state, api, args) for name in EXECUTION_COMMANDS},

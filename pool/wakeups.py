@@ -8,6 +8,7 @@ from contextlib import contextmanager
 import os
 from pathlib import Path
 import re
+import select
 import threading
 import time
 
@@ -23,6 +24,7 @@ PER_IDENTITY = 2
 EVENT_LIMIT = 50
 CURSOR = re.compile(r"[0-9a-f]{64}")
 STOPPING = {"freezing", "frozen", "backing_up"}
+PRESENCE = 1.0  # seconds between looks at whether a waiting browser page is still there
 
 
 def ledger_marker(service):
@@ -127,7 +129,10 @@ def events(service, state, actor):
             continue
         target = {"task_id": task["task_id"], "claim_id": claim["claim_id"]}
         work = claim["W"]
-        if task.get("receiver") == actor and work["state"] == "review" and service.visible(state, task, actor):
+        direct = (task.get("contract") or {}).get("completion_policy") == "executor-direct"
+        if direct and claim["origin"] == actor and work["state"] == "review" and service.visible(state, task, actor):
+            add("completion-requested", [claim["claim_id"], work["scope"], work.get("revision")], **target, revision=work.get("revision"))
+        if not direct and task.get("receiver") == actor and work["state"] == "review" and service.visible(state, task, actor):
             add("review-requested", [claim["claim_id"], work["scope"], work.get("revision")], **target, revision=work.get("revision"))
         if claim["origin"] != actor:
             continue
@@ -138,12 +143,32 @@ def events(service, state, actor):
             add("interrupted", [claim["claim_id"], recovery.get("event")], **target, reason=recovery.get("reason"))
         if task.get("cancel_requested"):
             add("cancel-requested", [claim["claim_id"]], **target)
+    from 协作沟通 import record_visible
+    from 协作复查 import visible as issue_visible, may_review
+    for record_key, row in state.get('round', {}).items():
+        if record_key.startswith('message:') and record_visible(state, row, actor) and row.get('status') != 'completed' and (
+                row.get('recipient') == actor or not row.get('recipient') and row.get('author') != actor):
+            add('task-message', [row['id'], row['version']], task_id=row['task_id'], record_id=row['id'], version=row['version'])
+        elif record_key.startswith('task-issue:') and issue_visible(state, row, actor) and row['status'] not in {'resolved', 'declined'}:
+            task = state['tasks'].get(row['task_id'])
+            if may_review(state, task, actor) or row['author'] == actor:
+                add('post-completion-issue', [row['id'], row['version']], task_id=row['task_id'], record_id=row['id'], version=row['version'])
     if security_schema(state) >= 5:
         for row in state["security"].get("execution", {}).get("actions", {}).values():
             if row.get("executor_id") == actor and row.get("state") == "granted":
                 add("resource-granted", [row["id"], row.get("grant_id"), row.get("generation")], task_id=row.get("task_id"),
                     claim_id=row.get("claim_id"), action_id=row["id"], grant_id=row.get("grant_id"))
-    return sorted(found, key=lambda event: (event["type"], event["key"]))[:EVENT_LIMIT]
+    # Discussion backlogs must never displace execution/resource safety notices.
+    priority = {'interrupted': 0, 'cancel-requested': 0, 'scope-changed': 1, 'resource-granted': 1,
+                'review-returned': 2, 'completion-requested': 2, 'review-requested': 2, 'task-ready': 3,
+                'post-completion-issue': 4, 'task-message': 5}
+    ordered = sorted(found, key=lambda event: (priority.get(event['type'], 3), event['type'], event['key']))
+    if len(ordered) <= EVENT_LIMIT:
+        return ordered
+    # Hash every authorized event, including omitted ones, so new work always changes the cursor.
+    overflow = {'type': 'more-events', 'key': digest(encoded(['more-events', actor, sorted(e['key'] for e in ordered)])),
+                'count': len(ordered), 'requires_read': True}
+    return [*ordered[:EVENT_LIMIT - 1], overflow]
 
 
 def cursor_of(found):
@@ -194,4 +219,69 @@ def respond(handler, target):
             server.wakeups.wait(seen, deadline - time.monotonic())
             actor, seen, found = look(handler, actor)
             if response := answer(found):
+                return response
+
+
+def left(handler):
+    """A waiting browser sends nothing more, so a readable connection means the page was closed or left."""
+    try:
+        return bool(select.select([handler.connection], [], [], 0)[0])
+    except (OSError, ValueError):
+        return True
+
+
+def workspace_look(handler, project, actor=None):
+    """One evaluation under the service lock for a signed-in page: who is asking, and the revision of what they see."""
+    from . import web, workbench
+    server = handler.server
+    service, wakeups = server.service, server.wakeups
+    seen = wakeups.seen()
+    if wakeups.closed or service.lifecycle.status()["phase"] in STOPPING:
+        raise Maintenance("服务正在升级，请稍后重新等待")
+    with service.lock:
+        with service.one_snapshot(wakeups.snapshot(service)):
+            caller = server.sessions.actor(web.session_id(handler), service)
+            if not caller or actor is not None and caller != actor:
+                raise ClientError("登录已失效，请重新登录", 401)
+            return caller, seen, workbench.workspace_revision(service.read(caller, "overview", project))
+
+
+def respond_workspace(handler, target):
+    """GET /workspace-state with a timeout: the workbench page's form of GET /v1/wait.
+
+    Answers at once when the revision of what the signed-in person sees differs from the one the page
+    was drawn with, otherwise when it changes or the time is over. None leaves the request to the
+    ordinary page route, which answers the current revision without waiting.
+    """
+    if target.path != "/workspace-state" or not handler.server.is_round or "timeout=" not in target.query:
+        return None
+    from . import __version__
+    from .httpd import JSON, parse_query
+    server = handler.server
+    query = parse_query(target.query, {"project", "revision", "timeout"})
+    known, hold = query.get("revision", ""), query.get("timeout", "")
+    if known and not CURSOR.fullmatch(known):
+        raise ClientError("状态摘要无效")
+    if not (hold.isascii() and hold.isdigit() and len(hold) <= 3 and int(hold) <= MAX_HOLD):
+        raise ClientError(f"等待时长须为 0 至 {MAX_HOLD} 秒")
+    deadline = time.monotonic() + int(hold)
+
+    def answer(revision):
+        if revision != known or deadline - time.monotonic() <= 0:
+            return 200, {"revision": revision, "version": __version__, "changed": revision != known}, JSON
+
+    actor, seen, revision = workspace_look(handler, query.get("project"))
+    if response := answer(revision):
+        return response
+    with server.wakeups.parked("web:" + actor):
+        server.release_request_slot()
+        while True:
+            server.wakeups.wait(seen, min(PRESENCE, max(0, deadline - time.monotonic())))
+            if left(handler):
+                handler.close_connection = True
+                raise ConnectionAbortedError("the page that was waiting has gone")
+            if server.wakeups.seen() == seen and not server.wakeups.closed and deadline - time.monotonic() > 0:
+                continue
+            actor, seen, revision = workspace_look(handler, query.get("project"), actor)
+            if response := answer(revision):
                 return response

@@ -23,11 +23,14 @@
     const initialRevision = stateContext.dataset.workspaceRevision;
     const stateUrl = new URL("/workspace-state", location.origin);
     if (stateContext.dataset.workspaceProject) stateUrl.searchParams.set("project", stateContext.dataset.workspaceProject);
-    let refreshTimer = null, inFlight = false, dirty = false, reloading = false, changed = false, notice = null;
+    // A held request (GET /workspace-state?revision=&timeout=) answers the moment the visible state changes.
+    // The plain check on a timer stays as the fallback whenever holding is refused, fails or is not honoured.
+    const HOLD = 45, POLL = 20000, HELD_AT_LEAST = 2000;
+    let refreshTimer = null, active = null, dirty = false, reloading = false, changed = false, notice = null;
     const clearRefreshTimer = () => { if (refreshTimer !== null) clearTimeout(refreshTimer); refreshTimer = null; };
     const scheduleRefresh = () => {
       clearRefreshTimer();
-      if (!document.hidden && !reloading) refreshTimer = setTimeout(checkWorkspace, 20000);
+      if (!document.hidden && !reloading) refreshTimer = setTimeout(checkWorkspace, POLL);
     };
     const reloadWorkspace = () => { reloading = true; clearRefreshTimer(); location.reload(); };
     const showRefreshNotice = (text, update) => {
@@ -48,35 +51,55 @@
     const canRefresh = () => ["/", "/board", "/list"].includes(location.pathname) && !dirty &&
       !document.activeElement?.matches?.("input, textarea, select, [contenteditable='true']") &&
       !document.querySelector(".wb-panel, .wb-scrim, dialog[open], [role='dialog']:not([hidden]), form[data-post-pending]");
-    async function checkWorkspace() {
+    async function checkWorkspace(hold) {
       clearRefreshTimer();
-      if (document.hidden || inFlight || reloading) return;
-      inFlight = true;
-      const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 8000);
+      if (document.hidden || active || reloading) return;
+      // Once a change is known but cannot be applied yet, a held request would answer at once every time.
+      const held = hold === true && !changed, url = new URL(stateUrl.href);
+      if (held) { url.searchParams.set("revision", initialRevision); url.searchParams.set("timeout", String(HOLD)); }
+      const controller = new AbortController(), request = active = {controller};
+      const timeout = setTimeout(() => controller.abort(), held ? (HOLD + 8) * 1000 : 8000), started = Date.now();
+      let waitNext = false;
       try {
-        const response = await fetch(stateUrl.href, {method: "GET", cache: "no-store", credentials: "same-origin",
+        const response = await fetch(url.href, {method: "GET", cache: "no-store", credentials: "same-origin",
           redirect: "error", headers: {Accept: "application/json"}, signal: controller.signal});
         if (!response.ok) throw new Error("unavailable");
         const result = await response.json();
         if (typeof result.revision !== "string" || !/^[a-f0-9]{64}$/.test(result.revision)) throw new Error("invalid revision");
-        if (document.hidden) return;
+        if (request !== active || document.hidden) return;
         if (result.revision !== initialRevision) {
           if (canRefresh()) reloadWorkspace();
+          // The page's own submission wakes its held request too; it leaves by itself, so the timer decides later.
+          else if (held && document.querySelector("form[data-post-pending]")) changed = true;
           else showRefreshNotice("任务状态已有更新；当前输入和详情保留，处理完成后可刷新。", true);
-        } else if (notice) { notice.remove(); notice = null; changed = false; }
+        } else {
+          if (notice) { notice.remove(); notice = null; }
+          changed = false;
+          // An unchanged answer that came back early was not held: keep to the timer instead of asking in a loop.
+          waitNext = !held || Date.now() - started >= HELD_AT_LEAST;
+        }
       } catch {
-        if (!document.hidden) showRefreshNotice("暂时无法同步状态，当前内容保留；连接恢复后可重新检查。", false);
+        // A refused or broken held request only falls back to the timer; the plain check reports a lost connection.
+        if (request === active && !document.hidden && !held) {
+          showRefreshNotice("暂时无法同步状态，当前内容保留；连接恢复后可重新检查。", false);
+        }
       } finally {
-        clearTimeout(timeout); inFlight = false; scheduleRefresh();
+        clearTimeout(timeout);
+        if (request === active) {
+          active = null;
+          if (waitNext) checkWorkspace(true); else scheduleRefresh();
+        }
       }
     }
     document.addEventListener("input", () => { dirty = true; });
     document.addEventListener("change", () => { dirty = true; });
     document.addEventListener("visibilitychange", () => {
       clearRefreshTimer();
-      if (!document.hidden) checkWorkspace();
+      if (document.hidden) {
+        if (active) { const request = active; active = null; request.controller.abort(); }
+      } else checkWorkspace(true);
     });
-    scheduleRefresh();
+    checkWorkspace(true);
   }
 
   // Actual POSTs stay on this page until a matching terminal receipt is verified.
