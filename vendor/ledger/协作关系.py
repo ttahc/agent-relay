@@ -139,8 +139,9 @@ TRANSITIONS = {
     "evidence": {"triage", "accepted", "deferred", "duplicate", "declined"},
     "accepted": {"working", "triage", "deferred"},
     "working": {"review", "triage", "deferred"},
-    "review": {"verified", "triage", "working"},
+    "review": {"verified", "resolved", "triage", "working"},
     "verified": {"review", "triage"},
+    "resolved": {"review", "triage"},
     "deferred": {"triage"},
     "duplicate": {"triage"},
     "declined": {"triage"},
@@ -191,10 +192,13 @@ def feedback(state, p, actor, now, event_id):
     task = state["tasks"].get(linked)
     if linked:
         require(task_project(task) == project, "跟踪任务须在本项目")
-    if wanted in {"accepted", "working", "review", "verified"}:
+    if wanted in {"accepted", "working", "review", "verified", "resolved"}:
         require(task and task["completes_on"], "须关联有验收判据的任务")
-    if wanted in {"review", "verified"}:
+    if wanted in {"review", "verified", "resolved"}:
         require(task["status"] == "completed", "关联任务尚未完成验收和收口")
+    if wanted == "resolved":
+        require(bool(p["evidence"]), "问题解决须有复现条件与结果证据")
+        state['pilot']['format']['min_reader'] = max(state['pilot']['format'].get('min_reader', 1), 7)
     if wanted == "verified":
         require(p["metrics"] and p["evidence"] and p["lesson"] and p["limits"],
                 "须有实测改善、证据、经验及适用限制")

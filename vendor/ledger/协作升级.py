@@ -386,16 +386,33 @@ def reviewer(state, task, actor):
             require(owner and None not in owners and owner not in owners, "须核对不同责任账号", "intent-final")
 
 
+def completion_policy(task):
+    return (contract(task) or {}).get("completion_policy", "review-required")
+
+
+def direct_closer(state, task, actor):
+    record = state.get("acceptances", {}).get((task or {}).get("accepted"), {})
+    claim = state.get("claims", {}).get(record.get("claim_id"), {})
+    return bool(completion_policy(task) == "executor-direct" and
+                record.get("completion_kind") == "executor-direct" and record.get("independent") is False and
+                record.get("origin") == actor == claim.get("origin") and record.get("scope_version") == task["scope_version"] and
+                active(state, actor) and "executor" in roles(state, task_project(task), actor))
+
+
 def task_spec(state, data, task_id=None):
     core = {"project_id", "iteration", "delivery", "requirements", "review_mode", "user_basis"}
-    require(isinstance(data, dict) and (set(data) == core or set(data) == core | {"dispatch"} and
+    require(isinstance(data, dict) and (set(data) - {"completion_policy"} == core or set(data) - {"completion_policy"} == core | {"dispatch"} and
             state["pilot"].get("format", {}).get("schema", 0) >= ROUND_VERSION), "任务合同字段不完整")
+    policy = data.get("completion_policy", completion_policy(state["tasks"][task_id]) if task_id else "review-required")
+    require(isinstance(policy, str) and policy in {"review-required", "executor-direct"}, "完成策略无效")
+    if task_id is not None:
+        require(policy == completion_policy(state["tasks"][task_id]), "创建时的完成策略不可变更")
     project = data["project_id"]
     require(isinstance(project, str) and project_record(state, project), "须选择已登记项目")
     require(isinstance(data["delivery"], str) and 0 < len(data["delivery"].strip()) <= 2000, "须声明交付物")
     require(isinstance(data["review_mode"], str) and data["review_mode"] in MODES and isinstance(data["user_basis"], str) and
             (data["review_mode"] != "user" or 0 < len(data["user_basis"].strip()) <= 2000), "验收策略缺少明确依据")
-    spec = {**data, "requirements": requirement_rows(data["requirements"],state.get('security',{}).get('schema',0)>=5),
+    spec = {**data, **({"completion_policy": policy} if "completion_policy" in data or task_id and policy == "executor-direct" else {}), "requirements": requirement_rows(data["requirements"],state.get('security',{}).get('schema',0)>=5),
             "iteration": iteration(state, data["iteration"], project, task_id)}
     if "dispatch" in spec:
         from 协作本轮 import task_policy
@@ -440,7 +457,7 @@ def guard(state, env, context):
             require(not missing, "；".join(missing))
         return
     project = spec["project_id"]
-    if command in {"claim", "acquire", "resume", "seal", "ack_scope", "register", "review", "close"}:
+    if command in {"claim", "acquire", "resume", "seal", "ack_scope", "register", "review", "executor_complete", "close"}:
         require(audit.get("authorization") == auth_stamp(state, actor, project), "授权已变更，须重新核对")
     if command in {"claim", "acquire", "resume", "seal", "ack_scope"}:
         require(actor == (claim["origin"] if claim else env["origin_id"]), "执行身份与领取不符", "intent-final")
@@ -469,8 +486,13 @@ def guard(state, env, context):
         from 协作本轮 import automation_allowed, ready_key
         require(state["pilot"]["format"]["schema"] >= ROUND_VERSION and p["notice"] == ready_key(task, actor) and
                 automation_allowed(state, task, actor), "通知已过期或自动执行授权不足")
+    if command == "executor_complete":
+        require(claim and actor == claim["origin"] == env["origin_id"] and
+                completion_policy(task) == "executor-direct" and "executor" in roles(state, project, actor),
+                "直接完成需要创建时授权及当前执行权限", "intent-final")
     if command in {"review", "close"}:
-        reviewer(state, task, actor)
+        if command != "close" or not direct_closer(state, task, actor):
+            reviewer(state, task, actor)
     if command == "withdraw_delivery" and state["pilot"]["format"]["schema"] >= ROUND_VERSION:
         require("executor" in roles(state, project, actor), "撤回交付需要当前项目执行权限", "intent-final")
         require(audit.get("authorization") == auth_stamp(state, actor, project), "授权已变更，须重新核对")

@@ -1,16 +1,36 @@
 """Project feedback and change pages."""
 from datetime import datetime, timezone
 from html import escape
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from . import round_web, task_pages as pages, upgrade_pages as ui, workbench
 from .packages import ClientError, strict_json
 
 KINDS = {"issue": "问题", "feedback": "使用反馈", "hypothesis": "待验证推测"}
 BADGES = {"triage": "mid", "evidence": "mid", "accepted": "info", "working": "info", "review": "mid",
-          "verified": "ok", "deferred": "dec", "duplicate": "dec", "declined": "dec"}
+          "verified": "ok", "resolved": "ok", "deferred": "dec", "duplicate": "dec", "declined": "dec", "withdrawn": "dec"}
 LABELS = {"triage": "待评估", "evidence": "待补证", "accepted": "已纳入", "working": "处理中",
-          "review": "待效果复核", "verified": "已验证关闭", "deferred": "延期", "duplicate": "重复关联", "declined": "不采纳"}
+          "review": "待效果复核", "resolved": "问题已解决", "verified": "已验证关闭", "deferred": "延期", "duplicate": "重复关联", "declined": "不采纳", "withdrawn": "已撤回"}
+
+
+SECTIONS = {"current": "当前反馈", "deferred": "延期反馈", "history": "历史反馈"}
+CLOSED_FEEDBACK = {"resolved", "verified", "duplicate", "declined", "withdrawn"}
+
+
+def feedback_section(item):
+    """Presentation only: linked task state must never reopen closed feedback."""
+    if item["status"] in CLOSED_FEEDBACK:
+        return "history"
+    return "deferred" if item["status"] == "deferred" else "current"
+
+
+def feedback_url(project=None, section="all", query=""):
+    values = {"section": section}
+    if project:
+        values["project"] = project
+    if query:
+        values["q"] = query
+    return "/collaboration?" + urlencode(values)
 
 
 def operation(project, action, text, controls, values=None):
@@ -67,14 +87,14 @@ def feedback_form(projects, selected):
     return round_web.password_form("/collaboration", fields, "提交")
 
 
-def render(actor, project, data, versions, projects):
+def render(actor, project, data, versions, projects, section="all", query=""):
     from 协作关系 import TRANSITIONS
     names = {p["id"]: p["name"] for p in projects}
-    feedback = []
+    feedback = {key: [] for key in SECTIONS}
     for item in reversed(data["feedback"]):
         update = ""
         if project and (data["managed"] or item["author"] == actor):
-            allowed = (TRANSITIONS[item["status"]] | {item["status"]}) if data["managed"] else {item["status"]}
+            allowed = (TRANSITIONS.get(item["status"], set()) | {item["status"]}) if data["managed"] else {item["status"]}
             inputs = (ui.selection("status", "状态", [(key, val) for key, val in LABELS.items() if key in allowed], item["status"])
                       + ui.input_field("linked_task", "跟踪任务", required=False)
                       + ui.input_field("duplicate", "主反馈编号", required=False)
@@ -84,7 +104,7 @@ def render(actor, project, data, versions, projects):
                       + ui.text_field("limits", "适用条件和失效情形", required=False))
             update = ui.block("处理或补证", operation(project, "feedback-update", "保存反馈处理", inputs,
                                                          {"id": item["id"], "version": item["version"]}))
-        trail = "".join(f'<li>{escape(log["by"])} · {escape(LABELS[log["status"]])} · {escape(log["reason"])}'
+        trail = "".join(f'<li>{escape(log["by"])} · {escape(LABELS.get(log["status"], log["status"]))} · {escape(log["reason"])}'
                         f'<p>{escape(log["evidence"])}</p><p>{escape(log["lesson"])} {escape(log["limits"])}</p></li>'
                         for log in item["updates"])
         managers = set(data.get("managed_projects", []))
@@ -96,15 +116,15 @@ def render(actor, project, data, versions, projects):
         trail += "".join(f'<li>调整项目：{escape(names.get(move["from"], move["from"]))} → '
                          f'{escape(names.get(move["to"], move["to"]))} · {escape(move["reason"])} · {escape(move["by"])}</li>'
                          for move in item.get("project_history", []))
-        related = " ".join(f'<a class="tid" data-task-link href="/tasks/{escape(tid, quote=True)}">{escape(tid)}</a>' for tid in (item.get("task_id"), item.get("linked_task")) if tid)
+        related = " ".join(f'<a class="tid" data-task-link href="/tasks/{quote(tid, safe="")}">{escape(tid)}</a>' for tid in (item.get("task_id"), item.get("linked_task")) if tid)
         follow = "待累计样本复看" if item.get("follow_up") == "pending" else ""
         place = f'<div class="muted-text">{escape(names.get(item["project_id"], item["project_id"]))}</div>' if not project else ""
         link = ""
         if not project:
-            href = "/collaboration?" + urlencode({"project": item["project_id"]})
+            href = feedback_url(item["project_id"], section, query)
             link = f'<a class="secondary btn-sm" href="{escape(href, quote=True)}">进入项目处理</a>'
         history = f'<details class="tech"><summary>处理记录</summary><ul>{trail}</ul></details>' if trail else ""
-        feedback.append(f'<tr id="{escape(item["id"], quote=True)}"><td class="tid">{escape(item["id"][:11])}</td><td>{KINDS[item["kind"]]}</td>'
+        feedback[feedback_section(item)].append(f'<tr id="{escape(item["id"], quote=True)}"><td class="tid">{escape(item["id"][:11])}</td><td>{KINDS[item["kind"]]}</td>'
                         f'<td class="wide"><b>{escape(item["title"])}</b>{place}<div class="muted-text">{escape(item["details"])}</div>'
                         f'<div class="muted-text">影响：{escape(item["impact"])}{" · 证据：" + escape(item["evidence"]) if item["evidence"] else ""}</div>{history}</td>'
                         f'<td>{workbench.avatar(item["author"])}<div class="muted-text">{escape(item["observed"][:10])}</div></td>'
@@ -132,7 +152,7 @@ def render(actor, project, data, versions, projects):
         changes.append(f'<li>{escape(record["id"])} · {escape(record["status"])} · {escape(record["reason"])}{controls}</li>')
 
     def tab(key, name):
-        href = "/collaboration" + ("?" + urlencode({"project": key}) if key else "")
+        href = feedback_url(key, section, query)
         return f'<a href="{escape(href, quote=True)}"{' aria-current="page"' if (key or None) == project else ""}>{escape(name)}</a>'
     tabs = ""
     if len(projects) > 1:
@@ -142,11 +162,31 @@ def render(actor, project, data, versions, projects):
             else '<p class="empty">你在所属项目里没有记录反馈的权限，只能查看。</p>')
     records = "".join(decisions + relations + changes)
     guide = editing(project, data, versions) if data["managed"] else ('<p class="muted-text">选择具体项目后可以登记决定、任务关系和拆分合并。</p>' if not project and len(projects) > 1 else "")
+    search = ('<form method="get" action="/collaboration" class="operation filter-grid">'
+              + (pages.hidden("project", project) if project else "") + pages.hidden("section", section)
+              + ui.input_field("q", "搜索反馈、证据与处理记录", query, required=True, size=200)
+              + '<button class="secondary" type="submit">搜索</button>'
+              + f'<a class="secondary" href="{escape(feedback_url(project, section), quote=True)}">清除搜索</a></form>')
+    section_tabs = '<nav class="seg" aria-label="反馈分区">' + "".join(
+        f'<a href="{escape(feedback_url(project, key, query), quote=True)}"'
+        + (' aria-current="page"' if key == section else '') + f'>{label}</a>'
+        for key, label in [("all", "全部反馈"), *SECTIONS.items()]) + '</nav>'
+    tables = []
+    empty = {"current": "暂无需要处理的反馈。", "deferred": "暂无延期反馈。", "history": "暂无已关闭的历史反馈。"}
+    if query:
+        empty = {key: "此分区没有匹配的可见反馈，可清除搜索或切换分区。" for key in SECTIONS}
+    for key, label in SECTIONS.items():
+        if section not in {"all", key}:
+            continue
+        tables.append(f'<section id="feedback-{key}"><h2>{label} <span class="count">{len(feedback[key])}</span></h2>'
+                      + ('<p class="muted-text">保留原始证据与处理记录；关联任务的状态不会自动重开反馈。</p>' if key == "history" else '')
+                      + '<div class="table-wrap"><table><thead><tr><th>编号</th><th>类型</th><th>标题</th><th>提出</th><th>关联</th><th>状态</th><th>处理</th></tr></thead><tbody>'
+                      + ("".join(feedback[key]) or f'<tr><td colspan="7" class="muted-text">{empty[key]}</td></tr>')
+                      + '</tbody></table></div></section>')
     return (
         tabs + '<p class="muted-text">报告者以上的成员（包括 AI 窗口）都可以记录问题和建议，观察者只能查看。项目管理员评估后，可以转入处理、标记重复或不采纳。'
         '完成后回到这里写下实际改善了什么，作为下一轮的依据。</p>' + form
-        + '<div class="table-wrap"><table><thead><tr><th>编号</th><th>类型</th><th>标题</th><th>提出</th><th>关联</th><th>状态</th><th>处理</th></tr></thead><tbody>'
-        + ("".join(feedback) or '<tr><td colspan="7" class="muted-text">暂无反馈。</td></tr>') + "</tbody></table></div>"
+        + search + section_tabs + "".join(tables)
         + f'<div class="box"><h3>决定、关系与拆合</h3>{guide}<ul class="roster">{records}</ul></div>'
     )
 
@@ -155,6 +195,12 @@ def dispatch(handler, method, target, actor):
     from .httpd import parse_query
     from .web import parse_form, redirect
     service = handler.server.service
+    filters = parse_query(target.query, {"project", "section", "q"})
+    from .round_projects import feedback_query
+    query = feedback_query(filters.get("q", ""))
+    section = filters.get("section", "all")
+    if section not in {"all", *SECTIONS}:
+        raise ClientError("反馈分区无效")
     if method == "POST":
         data = parse_form(handler, 256 * 1024, 35)
         action = data.pop("operation", "")
@@ -168,11 +214,12 @@ def dispatch(handler, method, target, actor):
         if status != 200:
             return round_web.page("协作操作待核", value.get("message") or (value.get("steps") or [{}])[-1].get("reason", "请重送原表单"),
                                   status, actor=actor)
-        return redirect("/collaboration?" + urlencode({"project": data.get("target_project_id", data["project_id"])}))
-    project = parse_query(target.query, {"project"}).get("project")
+        return redirect(feedback_url(data.get("target_project_id", data["project_id"]), section, query))
+    project = filters.get("project")
     projects = service.read(actor, "projects")["projects"]
     if not project and len(projects) == 1:
         project = projects[0]["id"]
-    data = service.read(actor, "collaboration", project)
+    data = service.read(actor, "collaboration", {"project": project, "q": query}) if query else service.read(actor, "collaboration", project)
     versions = {t["task_id"]: t["version"] for t in service.read(actor, "overview", project)["tasks"]} if project else {}
-    return round_web.work_page("反馈与决定", render(actor, project, data, versions, projects), actor)
+    return round_web.work_page("反馈与决定", render(actor, project, data, versions, projects, section, query).replace('method="post" action="/collaboration"',
+        'method="post" action="' + escape(feedback_url(project, section, query), quote=True) + '"'), actor)
