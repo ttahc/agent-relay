@@ -215,7 +215,7 @@ class InviteLinks(unittest.TestCase):
     def test_minimal_client_archive_has_only_client_docs_and_metadata(self):
         raw = build.client_bundle_bytes()
         with zipfile.ZipFile(BytesIO(raw)) as archive:
-            self.assertEqual(set(archive.namelist()), {"ops/round-client.py", "ops/round-client.ps1", "README.md",
+            self.assertEqual(set(archive.namelist()), {"ops/round-client.py", "ops/round-client.ps1", "ops/relay-mcp.py", "README.md",
                                                      "docs/AI客户端操作.md", "docs/执行环境与资源映射.md", "client-version.json", "LICENSE"})
             self.assertEqual(archive.read("README.md"), archive.read("docs/AI客户端操作.md"))
             self.assertEqual(json.loads(archive.read("client-version.json"))["purpose"], "ai-window-client")

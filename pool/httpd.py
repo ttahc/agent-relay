@@ -49,6 +49,7 @@ def listing_query(query):
 # becomes the argument of Service.read, the content type, and whether only round mode serves it.
 READ_API = {
     "features": (None, None, JSON, False),
+    "openapi": (None, None, JSON, False),
     "post-completion": ({"task_id"}, one_value("task_id"), JSON, True),
     "communication": ({"project", "task_id", "q"}, whole_query, JSON, True),
     "execution": ({'task_id', 'claim_id', 'action_id', 'executor_id'}, whole_query, JSON, False),
