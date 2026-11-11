@@ -51,6 +51,7 @@ READ_API = {
     "features": (None, None, JSON, False),
     "openapi": (None, None, JSON, False),
     "attention": (None, None, JSON, True),
+    "agent-cards": (None, None, JSON, False),
     "post-completion": ({"task_id"}, one_value("task_id"), JSON, True),
     "communication": ({"project", "task_id", "q"}, whole_query, JSON, True),
     "execution": ({'task_id', 'claim_id', 'action_id', 'executor_id'}, whole_query, JSON, False),

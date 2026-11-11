@@ -273,6 +273,34 @@
         "x-journaled": true
       }
     },
+    "/v1/agent-cards": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "读取 agent-cards",
+        "tags": [
+          "read"
+        ]
+      }
+    },
     "/v1/ai-activate": {
       "post": {
         "requestBody": {

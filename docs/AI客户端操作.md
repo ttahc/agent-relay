@@ -308,6 +308,32 @@ python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential resourc
 
 `GET /v1/openapi` 返回 OpenAPI 3.1 格式的接口说明，`features.openapi` 为 `true` 时可用；仓库中的 `docs/openapi.json` 是同一份内容。它由服务端路由表生成，列出全部路径、查询参数、认证方式和是否记入请求日志（`x-journaled`）。请求体只在一张表能完整说明时才逐项列出字段（执行段与资源、任务沟通），其余写入只标出必需的 `request_id`，字段仍以本手册为准。路由变化后运行 `python -B verify_openapi.py --write` 重新生成。
 
+## A2A 名片与状态对照（agent-cards）
+
+`GET /v1/agent-cards` 把调用者可见的窗口按 A2A v1.0 的 Agent Card 字段导出（`name`、`description`、`provider`、`version`、`capabilities`、`skills` 等），供其他智能体工具读取有哪些窗口参与协作。这只是用语对齐，不是 A2A 实现：窗口本身不提供 A2A 接口，所以 `supportedInterfaces` 为空，工作仍只能通过本服务的任务派发。`skills` 只列当前有效、证据等级为 `probed` 或 `verified` 的能力，自行申报（`declared`）的不列入。可见范围与窗口目录相同。
+
+同一回执的 `task_states` 给出本服务任务阶段与 A2A 任务状态的对照：
+
+| 本服务阶段 | A2A 状态 | 说明 |
+| --- | --- | --- |
+| `waiting`（待启动） | `TASK_STATE_SUBMITTED` |  |
+| `available`（可领取） | `TASK_STATE_SUBMITTED` |  |
+| `claimed`（已领取 · 执行回报待确认） | `TASK_STATE_WORKING` |  |
+| `running`（执行中） | `TASK_STATE_WORKING` |  |
+| `handoff_pending`（交接中） | `TASK_STATE_WORKING` |  |
+| `review`（待验收） | `TASK_STATE_INPUT_REQUIRED` | 等待接收者验收：A2A 中最接近“需要输入” |
+| `revision`（待返修） | `TASK_STATE_WORKING` |  |
+| `paused`（待恢复执行） | `TASK_STATE_INPUT_REQUIRED` |  |
+| `recovery`（恢复待核） | `TASK_STATE_INPUT_REQUIRED` |  |
+| `cancel_pending`（取消中 · 待停止） | `TASK_STATE_WORKING` | 已请求取消、待确认停止；停止前不算 CANCELED |
+| `accepted`（已验收 · 待停止） | `TASK_STATE_WORKING` | 已验收但执行尚未确认停止，本服务仍视为进行中 |
+| `pending_close`（待收口） | `TASK_STATE_WORKING` | 已验收、待收口归档，本服务仍视为进行中 |
+| `completed`（已完成） | `TASK_STATE_COMPLETED` |  |
+| `closed_missing`（已收口 · 证据缺失） | `TASK_STATE_COMPLETED` | 已收口但证据缺失；A2A 没有对应状态 |
+| `cancelled`（已取消） | `TASK_STATE_CANCELED` |  |
+| `replaced`（已拆分） | `TASK_STATE_CANCELED` |  |
+| `merged`（已归并） | `TASK_STATE_CANCELED` |  |
+
 ## 节点总览（nodes）
 
     python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential nodes
