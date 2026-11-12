@@ -104,6 +104,8 @@ class Service:
         initialize_safety(self.db)
         self.passwords = Passwords(self.db, self.lock, self.accounts)
         self.notices = round_service.Notices(self.db)
+        from .push import Push
+        self.push = Push(self.db)
         snap = self.snapshot()
         fmt = snap["state"]["pilot"].get("format")
         from 协作安全 import READER
@@ -383,7 +385,8 @@ class Service:
         content_sha = digest(encoded(env))
         terminal = snap["control"]["terminal"].get(event_key)
         if not terminal:
-            present = any(r["sha256"] == content_sha for r in self.desk.copies())
+            digests = getattr(self.desk, "copy_digests", None)  # the incremental backends verify without copying
+            present = content_sha in digests() if digests else any(r["sha256"] == content_sha for r in self.desk.copies())
             if not present:
                 if "file" in instruction:
                     path, raw = instruction["file"]

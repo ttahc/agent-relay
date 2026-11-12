@@ -103,8 +103,8 @@ class IncrementalRead:
         with self._cache_lock:
             self._cache = (listed, pickle.dumps(snap, protocol=pickle.HIGHEST_PROTOCOL))
 
-    def copies(self):
-        """Inbox copies, re-reading only files that are new or whose metadata changed.
+    def _scan_inbox(self):
+        """Verified inbox records as (fingerprint, pickled record, content SHA256), re-reading only new or changed files.
 
         Inbox files are published once and never rewritten. A file whose name, size, modification
         time, change time and inode are unchanged since it was verified is not hashed again.
@@ -118,21 +118,27 @@ class IncrementalRead:
             return []
         with os.scandir(folder) as found:
             listed = sorted(_fingerprint(entry) for entry in found if entry.name.endswith(".json"))
-        fresh, result = {}, []
+        fresh = {}
         for fingerprint in listed:
             name = fingerprint[0]
             known = kept.get(name)
             if known and known[0] == fingerprint:
-                raw = known[1]
-            else:
-                record = read_json(safe(self.store, "inbox/" + name))
-                if digest(encoded(record["envelope"])) != record["sha256"] or name[:-5] != record["copy_id"]:
-                    raise ValueError("收件箱副本已变化，保留现场")
-                raw = pickle.dumps(record, protocol=pickle.HIGHEST_PROTOCOL)
-            fresh[name] = (fingerprint, raw)
-            result.append(pickle.loads(raw))
+                fresh[name] = known
+                continue
+            record = read_json(safe(self.store, "inbox/" + name))
+            if digest(encoded(record["envelope"])) != record["sha256"] or name[:-5] != record["copy_id"]:
+                raise ValueError("收件箱副本已变化，保留现场")
+            fresh[name] = (fingerprint, pickle.dumps(record, protocol=pickle.HIGHEST_PROTOCOL), record["sha256"])
         self._copies = fresh
-        return result
+        return [fresh[fingerprint[0]] for fingerprint in listed]
+
+    def copies(self):
+        """Inbox copies, each an independent object, in file name order."""
+        return [pickle.loads(raw) for _, raw, _ in self._scan_inbox()]
+
+    def copy_digests(self):
+        """The content SHA256 of every inbox copy, verified the same way, without materializing the records."""
+        return {sha for _, _, sha in self._scan_inbox()}
 
     def forget(self):
         """Drop what was kept so the next read verifies the whole chain and inbox again."""

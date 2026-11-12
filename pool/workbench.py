@@ -147,7 +147,8 @@ def workspace_revision(data):
               "title": task.get("title"), "stage": task.get("stage"), "holder": task.get("holder"),
               "window": task.get("window"), "window_name": task.get("window_name"), "receiver": task.get("receiver"),
               "owner": owner_of(task), "last_executor": task.get("last_executor"),
-              "qualification": {key: (task.get("qualification") or {}).get(key) for key in ("eligible", "prioritized", "missing")}}
+              "qualification": {key: (task.get("qualification") or {}).get(key) for key in ("eligible", "prioritized", "missing")},
+              "reminders": [row["key"] for row in task.get("reminders", [])]}
              for task in data.get("tasks", [])]
     projects = [{"id": project["id"], "name": project.get("name"), "version": project.get("version"),
                  "owner": project.get("owner"), "roles": sorted(project.get("roles", []))} for project in data.get("projects", [])]
@@ -466,6 +467,8 @@ def list_page(actor, data, filters, activity):
 
 def todo_reason(task, actor, roles):
     stage = task["stage"]
+    if task.get("reminders"):
+        return "提醒：" + task["reminders"][0]["message"]
     if stage == "review" and pages.executor_direct(task):
         return "待你凭交付证据确认完成" if task.get("holder") == actor else ""
     if stage == "review" and task["receiver"] == actor and (task.get("holder") != actor or

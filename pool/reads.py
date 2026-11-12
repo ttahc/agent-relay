@@ -49,6 +49,7 @@ def features(r, argument):
     result.setdefault('features', {})['input-package'] = True
     result['features']['list-summary'] = True
     result['features']['openapi'] = True
+    result['features']['agent-cards'] = True
     result['features'].update({'executor-complete': r.upgraded, 'post-completion': r.round_enabled, 'task-communication': r.round_enabled})
     from 协作安全 import READER
     from .project_capabilities import state_ready
@@ -57,8 +58,19 @@ def features(r, argument):
     if r.round_enabled:
         result['features']['wait'] = True
         result['features']['window-apply'] = True
+        result['features']['attention'] = True
+        result['features']['push'] = True
         result['wait'] = {'max_seconds': wakeups.MAX_HOLD}
     return result
+
+
+def push_config(r, argument):
+    return r.service.push.status(r.actor)
+
+
+def attention(r, argument):
+    from .attention import view
+    return view(r.service, r.snap, r.actor)
 
 
 def openapi(r, argument):
@@ -177,6 +189,11 @@ def task_options(r, argument):
 def overview(r, argument):
     service, state, actor = r.service, r.state, r.actor
     shown = []
+    from .attention import describe, reminders
+    reminded = {}
+    if r.round_enabled:
+        for row in reminders(service, state, r.snap.get("entries", []), actor):
+            reminded.setdefault(row["task_id"], []).append({"type": row["type"], "key": row["key"], "message": describe(row)})
     for task in r.visible_tasks:
         if argument and rules.task_project(task) != argument:
             continue
@@ -201,6 +218,7 @@ def overview(r, argument):
                                         "window_name": last_identity.get("window_name")} if last else None,
                       "last_claim_id": last["claim_id"] if last else None,
                       "revisions": len(current["deliveries"]) if current else 0,
+                      "reminders": reminded.get(task["task_id"], []),
                       "qualification": service.qualification(state, task, actor)})
     return {"roles": service.roles(state, actor), "upgraded": r.upgraded,
             "projects": upgrade.projects(state, actor), "tasks": shown, "round": r.round_enabled,
@@ -268,13 +286,16 @@ def executors(r, argument):
     for source in sources:
         source['can_manage'] = window_admin.allowed(state, actor, source['executor_id'])
         source['can_manage_projects'] = rules.system_admin(state, actor)
-    if r.route == "window-cards":
+    if r.route in {"window-cards", "agent-cards"}:
         joined = upgrade.projects(state, actor)
         for source in sources:
             name = source["executor_id"]
             source.update(auto=execution_settings(state, name)["auto"], capabilities=service.capability_rows(state, actor, name)[1],
                           memberships=[{"name": p["name"], "roles": sorted(rules.grant(state, p["id"], name)["roles"])}
                                        for p in joined if rules.grant(state, p["id"], name)["roles"]])
+    if r.route == "agent-cards":
+        from .agent_cards import view
+        return view(sources)
     if r.route == "nodes":
         from . import nodes
         return nodes.overview(state, actor, sources)
@@ -433,18 +454,18 @@ def stored_file(r, argument):
 
 
 ROUTES = {
-    "features": features, "openapi": openapi, "execution": execution_view, "post-completion": post_completion, "communication": communication, "window-impact": window_impact,
+    "features": features, "openapi": openapi, "attention": attention, "push-config": push_config, "execution": execution_view, "post-completion": post_completion, "communication": communication, "window-impact": window_impact,
     "capability-requests": capability_requests, "cleanup": cleanup, "invitations": invitations, "runner": runner,
     "notices": notices, "collaboration": collaboration, "sheet": sheet, "tasks": tasks, "task-options": task_options,
     "overview": overview, "activity": activity, "project-cards": project_cards, "project": project,
     "projects": projects, "input-package": input_package, "invitation-owners": invitation_owners,
     "release-readiness": release_readiness, "project-capabilities": project_capabilities, "project-capability-catalog": project_capability_catalog, "executors": executors,
-    "window-cards": executors, "nodes": executors, "identity": identity, "delegations": delegations, "capabilities": capabilities,
+    "window-cards": executors, "nodes": executors, "agent-cards": executors, "identity": identity, "delegations": delegations, "capabilities": capabilities,
     "audit": audit, "receipt": receipt, "upgrade": upgrade_status, "receivers": receivers,
     "account-table": account_table, "accounts": accounts, "detail": detail, "task": task, "board": board,
     "artifact": stash_artifact,
 }
-ROUND_ONLY = {"invitations", "runner", "notices", "collaboration"}
+ROUND_ONLY = {"invitations", "runner", "notices", "collaboration", "attention", "push-config"}
 
 
 def read(service, snap, actor, route, argument=None):

@@ -255,12 +255,31 @@ python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential resourc
 | `interrupted` | 执行被标记中断，待核对 | 该领取的持有者 |
 | `cancel-requested` | 任务被请求取消 | 该领取的持有者 |
 | `resource-granted` | 申请的资源已授权（语义 5） | 提出申请的窗口 |
+| `task-unclaimed` | 任务开放已满 24 小时仍无人领取 | 该项目的人员管理员 |
+| `claim-silent` | 持有活动领取、开启心跳的窗口已 10 分钟没有心跳 | 该窗口的责任人、项目的人员管理员 |
+| `claim-stalled` | 活动领取所在任务已 24 小时没有任何新记录 | 该窗口的责任人、项目的人员管理员 |
+
+后三种是超时与失联提醒，由时间触发，不需要新的写入，最迟在一次续接内（50 秒）出现。它们只提醒，不释放领取、资源或执行许可，也不把失联当作已停止：确认情况后仍按停止、交接或归还流程处理。时间取自账本记录的提交时间和心跳记录；没有开启心跳的窗口不会产生 `claim-silent`。`attention` 命令（`GET /v1/attention`）列出本身份当前的全部提醒、提醒说明和三个时限。人员在网页工作台「待我处理」中看到同样的提醒。
+
+    python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential attention
 
 事件只是提示，不代替任何操作：收到后仍按原流程用 `tasks`、`show`、`poll`、`execution` 读取详情，再领取、返修或验收。`wait` 不会自动领取、确认通知或启动程序。返修要求的修订、清单指纹和失败判据仍从 `poll` 或 `show` 读取。
 
 等待期间不占用凭据文件，同一窗口可以照常运行其他命令。服务升级、备份或暂时断开时，命令自行重连并继续等待；停机期间不会拖住升级。每个身份最多同时保持 2 个等待请求，服务总共 64 个，超出时回 429，可稍后再试或改用 `poll`。单个等待请求最长 50 秒，客户端自动续接。按时间才成立的变化（没有新的写入）最迟在一次续接内，也就是 50 秒内反映。
 
 对应接口为 `GET /v1/wait?cursor=<上次回执的 cursor>&timeout=<0 至 50>`，回执含 `cursor`、`changed`、`events`。不带 `cursor` 或游标已不是当前值时立即返回。服务在 `features` 中声明 `wait`；旧服务没有此声明，命令会提示改用 `poll`。`run` 自动执行循环在服务支持时同样改为等待事件，不支持时保持原来的定时查询。
+
+## 回调通知（push）
+
+不便常驻 `wait` 的窗口（例如按需唤起的云端会话背后的接收程序）可以登记一个回调地址。本窗口的等待事件变化时，服务向该地址发送一次 POST，请求头带 `Authorization: Bearer <登记时提供的密钥>`，请求体与 `wait` 回执相同，只含 `executor_id`、`cursor` 和 `events`（事件类型、键和编号），不含任务内容：
+
+    python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential push set --url https://receiver.example:8443/hook --secret-file ~/.taskpool/push-secret
+    python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential push show
+    python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential push clear
+
+密钥由窗口自选，32 至 256 个字符，放在仅本人可读的文件里；接收端据此确认请求来自本服务。对应接口为 `POST /v1/push-config`（`request_id`、`url`、`secret`，`url` 为空字符串即清除）和 `GET /v1/push-config`，只有 AI 窗口可以登记，每个窗口一个地址。
+
+推送只是提示：收到后仍用 `wait`、`poll`、`show` 或 `attention` 读取详情再操作，推送本身不授权、不领取、不启动任何程序。漏掉推送不会丢失任何事情，`wait` 照常从账本作答。服务在每次写入后以及每 30 秒（为超时与失联提醒）检查一次；投递不跟随重定向，单次 5 秒超时，2xx 视为成功，失败后依次等待 5 秒、15 秒、1 分钟、5 分钟、15 分钟再试，连续失败 20 次后暂停，重新登记即恢复。登记保存在服务自己的数据库中（与请求日志同处，含密钥，随私有备份一起保存），不写账本，不改变数据格式。窗口被停用或凭据失效后不再推送。
 
 ## 通过 MCP 接入（relay-mcp）
 
@@ -300,6 +319,32 @@ python3 -B ops/round-client.py --state ~/.taskpool/window-one.credential resourc
 ## 机器可读的接口说明（OpenAPI）
 
 `GET /v1/openapi` 返回 OpenAPI 3.1 格式的接口说明，`features.openapi` 为 `true` 时可用；仓库中的 `docs/openapi.json` 是同一份内容。它由服务端路由表生成，列出全部路径、查询参数、认证方式和是否记入请求日志（`x-journaled`）。请求体只在一张表能完整说明时才逐项列出字段（执行段与资源、任务沟通），其余写入只标出必需的 `request_id`，字段仍以本手册为准。路由变化后运行 `python -B verify_openapi.py --write` 重新生成。
+
+## A2A 名片与状态对照（agent-cards）
+
+`GET /v1/agent-cards` 把调用者可见的窗口按 A2A v1.0 的 Agent Card 字段导出（`name`、`description`、`provider`、`version`、`capabilities`、`skills` 等），供其他智能体工具读取有哪些窗口参与协作。这只是用语对齐，不是 A2A 实现：窗口本身不提供 A2A 接口，所以 `supportedInterfaces` 为空，工作仍只能通过本服务的任务派发。`skills` 只列当前有效、证据等级为 `probed` 或 `verified` 的能力，自行申报（`declared`）的不列入。可见范围与窗口目录相同。
+
+同一回执的 `task_states` 给出本服务任务阶段与 A2A 任务状态的对照：
+
+| 本服务阶段 | A2A 状态 | 说明 |
+| --- | --- | --- |
+| `waiting`（待启动） | `TASK_STATE_SUBMITTED` |  |
+| `available`（可领取） | `TASK_STATE_SUBMITTED` |  |
+| `claimed`（已领取 · 执行回报待确认） | `TASK_STATE_WORKING` |  |
+| `running`（执行中） | `TASK_STATE_WORKING` |  |
+| `handoff_pending`（交接中） | `TASK_STATE_WORKING` |  |
+| `review`（待验收） | `TASK_STATE_INPUT_REQUIRED` | 等待接收者验收：A2A 中最接近“需要输入” |
+| `revision`（待返修） | `TASK_STATE_WORKING` |  |
+| `paused`（待恢复执行） | `TASK_STATE_INPUT_REQUIRED` |  |
+| `recovery`（恢复待核） | `TASK_STATE_INPUT_REQUIRED` |  |
+| `cancel_pending`（取消中 · 待停止） | `TASK_STATE_WORKING` | 已请求取消、待确认停止；停止前不算 CANCELED |
+| `accepted`（已验收 · 待停止） | `TASK_STATE_WORKING` | 已验收但执行尚未确认停止，本服务仍视为进行中 |
+| `pending_close`（待收口） | `TASK_STATE_WORKING` | 已验收、待收口归档，本服务仍视为进行中 |
+| `completed`（已完成） | `TASK_STATE_COMPLETED` |  |
+| `closed_missing`（已收口 · 证据缺失） | `TASK_STATE_COMPLETED` | 已收口但证据缺失；A2A 没有对应状态 |
+| `cancelled`（已取消） | `TASK_STATE_CANCELED` |  |
+| `replaced`（已拆分） | `TASK_STATE_CANCELED` |  |
+| `merged`（已归并） | `TASK_STATE_CANCELED` |  |
 
 ## 节点总览（nodes）
 

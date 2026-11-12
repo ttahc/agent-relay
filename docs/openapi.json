@@ -43,6 +43,11 @@
         "scheme": "bearer",
         "type": "http"
       },
+      "metricsToken": {
+        "description": "taskpool.py metrics-token 生成的抓取令牌，或系统管理员令牌",
+        "scheme": "bearer",
+        "type": "http"
+      },
       "verifierToken": {
         "description": "管理员登记的独立探测凭据，格式 <verifier_id>.<secret>",
         "scheme": "bearer",
@@ -85,6 +90,34 @@
         },
         "security": [],
         "summary": "存活检查，仅局域网 TLS 模式提供",
+        "tags": [
+          "service"
+        ]
+      }
+    },
+    "/metrics": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain; version=0.0.4; charset=utf-8": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "metricsToken": []
+          }
+        ],
+        "summary": "运行指标，Prometheus 文本格式；须为抓取令牌或系统管理员令牌",
         "tags": [
           "service"
         ]
@@ -238,6 +271,34 @@
           "write"
         ],
         "x-journaled": true
+      }
+    },
+    "/v1/agent-cards": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "读取 agent-cards",
+        "tags": [
+          "read"
+        ]
       }
     },
     "/v1/ai-activate": {
@@ -557,6 +618,35 @@
         "tags": [
           "read"
         ]
+      }
+    },
+    "/v1/attention": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "读取 attention",
+        "tags": [
+          "read"
+        ],
+        "x-round-only": true
       }
     },
     "/v1/audit": {
@@ -3403,6 +3493,82 @@
         "tags": [
           "read"
         ]
+      }
+    },
+    "/v1/push-config": {
+      "get": {
+        "responses": {
+          "200": {
+            "content": {
+              "application/json; charset=utf-8": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "读取 push-config",
+        "tags": [
+          "read"
+        ],
+        "x-round-only": true
+      },
+      "post": {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "description": "其余字段见 docs/AI客户端操作.md；本说明未逐项列出。",
+                "properties": {
+                  "request_id": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "request_id"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            },
+            "description": "成功"
+          },
+          "default": {
+            "$ref": "#/components/responses/Rejected"
+          }
+        },
+        "security": [
+          {
+            "windowToken": []
+          }
+        ],
+        "summary": "写入 push-config（不记入请求日志）",
+        "tags": [
+          "write"
+        ],
+        "x-journaled": false,
+        "x-round-only": true
       }
     },
     "/v1/receipt": {

@@ -158,8 +158,13 @@ def events(service, state, actor):
             if row.get("executor_id") == actor and row.get("state") == "granted":
                 add("resource-granted", [row["id"], row.get("grant_id"), row.get("generation")], task_id=row.get("task_id"),
                     claim_id=row.get("claim_id"), action_id=row["id"], grant_id=row.get("grant_id"))
+    from .attention import reminders
+    entries = service.snapshot()["entries"] if getattr(service, "notices", None) is not None else []
+    for row in reminders(service, state, entries, actor):
+        found.append({key: row[key] for key in ("type", "key", "task_id", "claim_id", "holder", "since") if key in row})
     # Discussion backlogs must never displace execution/resource safety notices.
     priority = {'interrupted': 0, 'cancel-requested': 0, 'scope-changed': 1, 'resource-granted': 1,
+                'claim-silent': 1, 'claim-stalled': 2, 'task-unclaimed': 2,
                 'review-returned': 2, 'completion-requested': 2, 'review-requested': 2, 'task-ready': 3,
                 'post-completion-issue': 4, 'task-message': 5}
     ordered = sorted(found, key=lambda event: (priority.get(event['type'], 3), event['type'], event['key']))

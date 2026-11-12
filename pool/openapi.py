@@ -95,24 +95,26 @@ def document():
     known = write_fields()
     reported = {"$ref": "#/components/parameters/ReportedAt"}
     for name in sorted(PUBLIC_ACTIONS):
-        paths["/v1/" + name] = {"post": _operation(
+        paths.setdefault("/v1/" + name, {})["post"] = _operation(
             "写入 " + name + "（记入请求日志，可用原 request_id 与原请求体重试）", "windowToken", parameters=[reported],
-            body=_body(*known[name]) if name in known else _body(), tags=["write"], extra={"x-journaled": True})}
+            body=_body(*known[name]) if name in known else _body(), tags=["write"], extra={"x-journaled": True})
     for name in sorted(httpd.ROUND_WRITES):
-        paths["/v1/" + name] = {"post": _operation("写入 " + name + "（不记入请求日志）", "windowToken", body=_body(),
-                                                  tags=["write"], extra={**round_only, "x-journaled": False})}
+        paths.setdefault("/v1/" + name, {})["post"] = _operation("写入 " + name + "（不记入请求日志）", "windowToken", body=_body(),
+                                                  tags=["write"], extra={**round_only, "x-journaled": False})
     for name in sorted(project_capabilities.PROBE_WRITES):
-        paths["/v1/" + name] = {"post": _operation("独立探测端写入 " + name, "verifierToken", body=_body(), tags=["probe"],
-                                                  extra={"x-journaled": True})}
+        paths.setdefault("/v1/" + name, {})["post"] = _operation("独立探测端写入 " + name, "verifierToken", body=_body(), tags=["probe"],
+                                                  extra={"x-journaled": True})
     for name in sorted(round_service.BOOTSTRAP):
-        paths["/v1/" + name] = {"post": _operation("窗口接入 " + name, "enrollmentToken" if name == "ai-activate" else None,
-                                                  body=_body(), tags=["enrollment"], extra=round_only)}
+        paths.setdefault("/v1/" + name, {})["post"] = _operation("窗口接入 " + name, "enrollmentToken" if name == "ai-activate" else None,
+                                                  body=_body(), tags=["enrollment"], extra=round_only)
     paths["/v1/window-apply"] = {"post": _operation("凭平台接入点的申请码提交申请或查询结果", None,
                                                     body={"required": True, "content": {"application/json": {"schema": {"type": "object", "description": OPEN}}}},
                                                     tags=["enrollment"], extra=round_only)}
     paths["/v1/ai-invite-info"] = {"get": _operation("凭邀请链接中的证明读取邀请", "inviteProof", parameters=[_query("invite_id", True)],
                                                      tags=["enrollment"])}
     paths["/v1/service-status"] = {"get": _operation("服务阶段", "windowToken", tags=["service"])}
+    paths["/metrics"] = {"get": _operation("运行指标，Prometheus 文本格式；须为抓取令牌或系统管理员令牌", "metricsToken",
+                                           "text/plain; version=0.0.4; charset=utf-8", tags=["service"])}
     paths["/readyz"] = {"get": _operation("是否可接收请求；维护阶段返回 503", None, tags=["service"])}
     paths["/healthz"] = {"get": _operation("存活检查，仅局域网 TLS 模式提供", None, tags=["service"])}
 
@@ -128,7 +130,8 @@ def document():
             "securitySchemes": {"windowToken": bearer("已登记窗口或人员的令牌"),
                                 "verifierToken": bearer("管理员登记的独立探测凭据，格式 <verifier_id>.<secret>"),
                                 "enrollmentToken": bearer("ai-prepare 回执中的待激活令牌"),
-                                "inviteProof": bearer("邀请链接中的专用证明")},
+                                "inviteProof": bearer("邀请链接中的专用证明"),
+                                "metricsToken": bearer("taskpool.py metrics-token 生成的抓取令牌，或系统管理员令牌")},
             "parameters": {"ReportedAt": {"name": "X-TaskPool-Reported-At", "in": "header", "required": False,
                                           "schema": {"type": "string", "maxLength": 40}, "description": "带时区的 ISO 时间"}},
             "responses": {"Rejected": {"description": "拒绝或错误：JSON 对象，含 status 与 message", "content": {"application/json": {
